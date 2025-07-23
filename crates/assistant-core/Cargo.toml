@@ -1,0 +1,33 @@
+[package]
+name = "assistant-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.98"
+async-trait = "0.1.88"
+chrono = { version = "0.4.41", features = ["serde"] }
+dirs = "6.0.0"
+dotenvy = "0.15.7"
+eventsource-stream = "0.2.3"
+git2 = "0.20.2"
+globset = "0.4.16"
+grep = "0.3.2"
+html2text = "0.15.2"
+ractor = "0.15.6"
+reqwest = { version = "0.12.22", features = ["stream", "json"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.141"
+shell-words = "1.1.0"
+similar = "2.7.0"
+strip-ansi-escapes = "0.2.1"
+syntect = "5.2.0"
+thiserror = "2.0.12"
+tokio = { version = "1.46.1", features = ["full"] }
+tokio-tungstenite = "0.27.0"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+url = "2.5.4"
+uuid = { version = "1.17.0", features = ["v4", "serde"] }
