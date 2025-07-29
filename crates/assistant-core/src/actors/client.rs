@@ -20,13 +20,13 @@ use uuid::Uuid;
 pub struct ClientActor {
     config: Config,
     client: OpenAIClient<OpenAIConfig>,
-    chat_ref: Option<ActorRef<ChatMessage>>,
 }
 
 /// Client state tracking active streams
 pub struct ClientState {
     active_stream: Option<tokio::task::JoinHandle<()>>,
     cancel_tx: Option<mpsc::Sender<()>>,
+    chat_ref: Option<ActorRef<ChatMessage>>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +59,7 @@ impl Actor for ClientActor {
         Ok(ClientState {
             active_stream: None,
             cancel_tx: None,
+            chat_ref: None,
         })
     }
     
@@ -71,8 +72,7 @@ impl Actor for ClientActor {
         match msg {
             ClientMessage::SetChatRef(chat_ref) => {
                 tracing::debug!("Setting chat actor reference");
-                // We need to modify self, which we can't do in handle
-                // For now, we'll handle this differently
+                state.chat_ref = Some(chat_ref);
             }
             
             ClientMessage::Generate { id, messages, tools } => {
@@ -111,7 +111,7 @@ impl Actor for ClientActor {
                 
                 match stream_result {
                     Ok(stream) => {
-                        let chat_ref = self.chat_ref.clone();
+                        let chat_ref = state.chat_ref.clone();
                         let request_id = id;
                         
                         // Spawn task to handle stream
@@ -123,7 +123,7 @@ impl Actor for ClientActor {
                     }
                     Err(e) => {
                         tracing::error!("Failed to create stream: {}", e);
-                        if let Some(chat_ref) = &self.chat_ref {
+                        if let Some(chat_ref) = &state.chat_ref {
                             let _ = chat_ref.send_message(ChatMessage::Error {
                                 id,
                                 error: format!("Failed to create stream: {}", e),
@@ -165,13 +165,7 @@ impl ClientActor {
         Self {
             config,
             client,
-            chat_ref: None,
         }
-    }
-    
-    pub fn with_chat_ref(mut self, chat_ref: ActorRef<ChatMessage>) -> Self {
-        self.chat_ref = Some(chat_ref);
-        self
     }
     
     async fn handle_stream(
