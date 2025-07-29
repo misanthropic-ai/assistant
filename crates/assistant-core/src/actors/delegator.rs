@@ -1,7 +1,10 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use std::collections::HashMap;
 use crate::config::Config;
-use crate::messages::ToolCall;
+use crate::messages::{DelegatorMessage, ToolCall, ChatMessage};
+use crate::actors::tools::ToolMessage;
+use crate::actors::client::{ClientActor, ClientMessage};
+use uuid::Uuid;
 
 /// Actor that routes tools to specialized LLMs
 pub struct DelegatorActor {
@@ -10,22 +13,10 @@ pub struct DelegatorActor {
 
 /// Delegator state
 pub struct DelegatorState {
+    /// Map of tool names to their local tool actors
+    tool_actors: HashMap<String, ActorRef<ToolMessage>>,
     /// Map of tool names to their delegated client actors
-    delegated_clients: HashMap<String, ActorRef<super::client::ClientMessage>>,
-}
-
-#[derive(Debug)]
-pub enum DelegatorMessage {
-    /// Register a tool for delegation
-    RegisterTool {
-        tool_name: String,
-        client: ActorRef<super::client::ClientMessage>,
-    },
-    
-    /// Execute a delegated tool
-    ExecuteDelegated {
-        tool_call: ToolCall,
-    },
+    delegated_clients: HashMap<String, ActorRef<ClientMessage>>,
 }
 
 impl Actor for DelegatorActor {
@@ -36,14 +27,24 @@ impl Actor for DelegatorActor {
     async fn pre_start(
         &self,
         _myself: ActorRef<Self::Msg>,
-        _config: Self::Arguments,
+        config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Delegator actor starting");
         
         // TODO: Create client actors for each delegated tool based on config
+        let mut delegated_clients = HashMap::new();
+        
+        // Create delegated client actors for tools that need specialized LLMs
+        for (tool_name, tool_config) in &config.tools.configs {
+            if tool_config.delegate && tool_config.llm_config.is_some() {
+                // TODO: Create specialized client actor
+                tracing::info!("Tool {} is configured for delegation", tool_name);
+            }
+        }
         
         Ok(DelegatorState {
-            delegated_clients: HashMap::new(),
+            tool_actors: HashMap::new(),
+            delegated_clients,
         })
     }
     
@@ -54,16 +55,52 @@ impl Actor for DelegatorActor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
-            DelegatorMessage::RegisterTool { tool_name, client } => {
-                tracing::info!("Registering delegated tool: {}", tool_name);
-                state.delegated_clients.insert(tool_name, client);
+            DelegatorMessage::RegisterTool { name, actor_ref } => {
+                tracing::info!("Registering tool: {}", name);
+                state.tool_actors.insert(name, actor_ref);
             }
             
-            DelegatorMessage::ExecuteDelegated { tool_call } => {
-                tracing::info!("Executing delegated tool: {}", tool_call.tool_name);
-                // TODO: Route to appropriate delegated client
-                // TODO: Format specialized prompt
-                // TODO: Return results
+            DelegatorMessage::RouteToolCall { id, call, chat_ref } => {
+                tracing::info!("Routing tool call: {}", call.tool_name);
+                
+                // Check if tool should be delegated
+                let tool_config = self.config.tools.configs.get(&call.tool_name);
+                let should_delegate = tool_config
+                    .map(|tc| tc.delegate && tc.llm_config.is_some())
+                    .unwrap_or(false);
+                
+                if should_delegate {
+                    // Route to delegated client
+                    if let Some(delegated_client) = state.delegated_clients.get(&call.tool_name) {
+                        // TODO: Format tool call as specialized prompt
+                        tracing::info!("Delegating {} to specialized LLM", call.tool_name);
+                        // For now, just return an error
+                        chat_ref.send_message(ChatMessage::Error {
+                            id,
+                            error: format!("Tool delegation not yet implemented for: {}", call.tool_name),
+                        })?;
+                    } else {
+                        chat_ref.send_message(ChatMessage::Error {
+                            id,
+                            error: format!("Delegated client not found for: {}", call.tool_name),
+                        })?;
+                    }
+                } else {
+                    // Route to local tool actor
+                    if let Some(tool_ref) = state.tool_actors.get(&call.tool_name) {
+                        // Execute tool locally
+                        tool_ref.send_message(ToolMessage::Execute {
+                            id,
+                            params: call.parameters,
+                            chat_ref: chat_ref.clone(),
+                        })?;
+                    } else {
+                        chat_ref.send_message(ChatMessage::Error {
+                            id,
+                            error: format!("Tool not found: {}", call.tool_name),
+                        })?;
+                    }
+                }
             }
         }
         
@@ -78,9 +115,3 @@ impl DelegatorActor {
         }
     }
 }
-
-// TODO: Implement delegation logic
-// - Create separate ClientActor for each unique LLM config
-// - Format tool requests as specialized prompts
-// - Handle streaming responses
-// - Aggregate results back to main conversation

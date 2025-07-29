@@ -71,6 +71,20 @@ fn default_max_tokens() -> u32 {
     4096
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            api_key: "test-api-key".to_string(),
+            base_url: default_base_url(),
+            model: default_model(),
+            temperature: default_temperature(),
+            max_tokens: default_max_tokens(),
+            tools: ToolsConfig::default(),
+            telemetry: TelemetryConfig::default(),
+        }
+    }
+}
+
 impl Config {
     /// Load configuration from file
     pub fn load(path: &Path) -> Result<Self> {

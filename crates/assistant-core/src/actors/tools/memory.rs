@@ -1,13 +1,22 @@
-use async_trait::async_trait;
+use ractor::{Actor, ActorRef, ActorProcessingErr};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use crate::config::Config;
+use crate::messages::{ToolMessage, ChatMessage};
 use uuid::Uuid;
-use crate::config::tool_config::ToolConfig;
-use crate::messages::ToolResult;
-use super::base::ToolActorTrait;
 
 /// Actor for memory/context management
-pub struct MemoryActor;
+pub struct MemoryActor {
+    config: Config,
+}
+
+/// Memory state
+pub struct MemoryState {
+    /// Stored memories by key
+    memories: HashMap<String, String>,
+    /// Session context
+    context: Vec<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "operation")]
@@ -18,80 +27,104 @@ pub enum MemoryOperation {
     Clear { key: Option<String> },
 }
 
-#[async_trait]
-impl ToolActorTrait for MemoryActor {
-    fn name(&self) -> &str {
-        "memory"
-    }
+impl Actor for MemoryActor {
+    type Msg = ToolMessage;
+    type State = MemoryState;
+    type Arguments = Config;
     
-    fn description(&self) -> &str {
-        "Manage persistent memory and context"
-    }
-    
-    async fn validate_params(&self, params: &Value) -> Result<(), String> {
-        serde_json::from_value::<MemoryOperation>(params.clone())
-            .map(|_| ())
-            .map_err(|e| format!("Invalid parameters: {}", e))
-    }
-    
-    async fn execute(
+    async fn pre_start(
         &self,
-        id: Uuid,
-        params: Value,
-        config: &ToolConfig,
-    ) -> Result<ToolResult, anyhow::Error> {
-        let operation = serde_json::from_value::<MemoryOperation>(params)?;
-        
-        match operation {
-            MemoryOperation::Save { key, content } => {
-                // TODO: Implement memory save
-                Ok(ToolResult {
-                    success: true,
-                    output: format!("Saved {} bytes to memory key '{}'", content.len(), key),
-                    llm_content: "Memory saved".to_string(),
-                    summary: Some(format!("Saved memory: {}", key)),
-                })
-            }
-            
-            MemoryOperation::Load { key } => {
-                // TODO: Implement memory load
-                Ok(ToolResult {
-                    success: true,
-                    output: format!("Would load memory key: {}", key),
-                    llm_content: "Memory content here".to_string(),
-                    summary: Some(format!("Loaded memory: {}", key)),
-                })
-            }
-            
-            MemoryOperation::List => {
-                // TODO: Implement memory list
-                Ok(ToolResult {
-                    success: true,
-                    output: "Memory keys: [none]".to_string(),
-                    llm_content: "No memory keys found".to_string(),
-                    summary: Some("Listed memory keys".to_string()),
-                })
-            }
-            
-            MemoryOperation::Clear { key } => {
-                // TODO: Implement memory clear
-                let msg = match key {
-                    Some(k) => format!("Cleared memory key: {}", k),
-                    None => "Cleared all memory".to_string(),
+        _myself: ActorRef<Self::Msg>,
+        _config: Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        tracing::debug!("Memory actor starting");
+        Ok(MemoryState {
+            memories: HashMap::new(),
+            context: Vec::new(),
+        })
+    }
+    
+    async fn handle(
+        &self,
+        _myself: ActorRef<Self::Msg>,
+        msg: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        match msg {
+            ToolMessage::Execute { id, params, chat_ref } => {
+                tracing::info!("Memory tool execution with params: {:?}", params);
+                
+                // Parse operation
+                let operation: MemoryOperation = match serde_json::from_value(params) {
+                    Ok(op) => op,
+                    Err(e) => {
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Error: Invalid parameters - {}", e),
+                        })?;
+                        return Ok(());
+                    }
                 };
-                Ok(ToolResult {
-                    success: true,
-                    output: msg.clone(),
-                    llm_content: msg.clone(),
-                    summary: Some(msg),
-                })
+                
+                let result = match operation {
+                    MemoryOperation::Save { key, content } => {
+                        state.memories.insert(key.clone(), content.clone());
+                        format!("Saved {} bytes to memory key '{}'", content.len(), key)
+                    }
+                    
+                    MemoryOperation::Load { key } => {
+                        match state.memories.get(&key) {
+                            Some(content) => content.clone(),
+                            None => format!("Memory key '{}' not found", key),
+                        }
+                    }
+                    
+                    MemoryOperation::List => {
+                        let keys: Vec<&String> = state.memories.keys().collect();
+                        if keys.is_empty() {
+                            "No memory keys found".to_string()
+                        } else {
+                            format!("Memory keys: {:?}", keys)
+                        }
+                    }
+                    
+                    MemoryOperation::Clear { key } => {
+                        match key {
+                            Some(k) => {
+                                state.memories.remove(&k);
+                                format!("Cleared memory key: {}", k)
+                            }
+                            None => {
+                                state.memories.clear();
+                                "Cleared all memory".to_string()
+                            }
+                        }
+                    }
+                };
+                
+                // Send result back to chat actor
+                chat_ref.send_message(ChatMessage::ToolResult {
+                    id,
+                    result,
+                })?;
+            }
+            
+            ToolMessage::Cancel { id } => {
+                tracing::debug!("Cancelling memory operation {}", id);
+                // Memory operations are synchronous, nothing to cancel
+            }
+            
+            ToolMessage::StreamUpdate { .. } => {
+                // Memory doesn't stream updates
             }
         }
+        
+        Ok(())
     }
 }
 
 impl MemoryActor {
-    pub fn new() -> Self {
-        Self
+    pub fn new(config: Config) -> Self {
+        Self { config }
     }
 }

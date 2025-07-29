@@ -6,6 +6,12 @@ pub mod messages;
 pub use config::Config;
 pub use messages::*;
 
+// Re-export external dependencies that CLI needs
+pub use ractor;
+pub use serde_json;
+pub use uuid;
+pub use async_openai;
+
 use anyhow::Result;
 use ractor::{Actor, ActorRef};
 use tokio::task::JoinHandle;

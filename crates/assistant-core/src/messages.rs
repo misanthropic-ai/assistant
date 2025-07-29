@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
+use ractor::ActorRef;
 
 /// Core message types for actor communication
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ChatMessage {
     /// User input prompt
     UserPrompt { id: Uuid, prompt: String },
@@ -15,13 +16,16 @@ pub enum ChatMessage {
     ToolRequest { id: Uuid, call: ToolCall },
     
     /// Tool execution result
-    ToolResult { id: Uuid, result: ToolResult },
+    ToolResult { id: Uuid, result: String },
     
     /// Completion of response
     Complete { id: Uuid, response: String },
     
     /// Error during processing
     Error { id: Uuid, error: String },
+    
+    /// Set delegator actor reference
+    SetDelegatorRef(ActorRef<DelegatorMessage>),
 }
 
 /// Tool call information
@@ -32,22 +36,14 @@ pub struct ToolCall {
     pub delegate: bool,
 }
 
-/// Tool execution result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolResult {
-    pub success: bool,
-    pub output: String,
-    pub llm_content: String,
-    pub summary: Option<String>,
-}
-
 /// Messages for tool actors
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ToolMessage {
     /// Execute tool with parameters
     Execute {
         id: Uuid,
         params: serde_json::Value,
+        chat_ref: ActorRef<ChatMessage>,
     },
     
     /// Cancel ongoing execution
@@ -101,6 +97,23 @@ pub struct Stats {
     pub tokens_used: usize,
     pub tools_executed: usize,
     pub session_duration: u64,
+}
+
+/// Delegator messages for tool routing
+#[derive(Debug, Clone)]
+pub enum DelegatorMessage {
+    /// Route a tool call to appropriate actor
+    RouteToolCall {
+        id: Uuid,
+        call: ToolCall,
+        chat_ref: ActorRef<ChatMessage>,
+    },
+    
+    /// Register a tool actor
+    RegisterTool {
+        name: String,
+        actor_ref: ActorRef<ToolMessage>,
+    },
 }
 
 /// Supervisor messages for actor lifecycle

@@ -1,73 +1,32 @@
-use async_trait::async_trait;
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::config::tool_config::ToolConfig;
-use crate::messages::{ToolMessage, ToolResult};
+use crate::config::Config;
+use crate::messages::{ToolMessage, ChatMessage};
 
-/// Base trait for all tool actors
-#[async_trait]
-pub trait ToolActorTrait: Send + Sync + 'static {
-    /// Get the tool name
-    fn name(&self) -> &str;
-    
-    /// Get the tool description
-    fn description(&self) -> &str;
-    
-    /// Validate parameters before execution
-    async fn validate_params(&self, params: &Value) -> Result<(), String>;
-    
-    /// Execute the tool with given parameters
-    async fn execute(
-        &self,
-        id: Uuid,
-        params: Value,
-        config: &ToolConfig,
-    ) -> Result<ToolResult, anyhow::Error>;
-    
-    /// Check if confirmation is needed
-    async fn needs_confirmation(&self, params: &Value) -> bool {
-        false
-    }
-    
-    /// Get confirmation message
-    async fn get_confirmation_message(&self, params: &Value) -> Option<String> {
-        None
-    }
+/// Base implementation for tool actors with common functionality
+/// 
+/// This can be used as a reference implementation or extended
+/// for tools that need more complex behavior.
+pub struct BaseToolActor {
+    name: String,
+    config: Config,
 }
 
-/// Base tool actor implementation
-pub struct ToolActor<T: ToolActorTrait> {
-    inner: T,
-    config: ToolConfig,
-}
+pub struct BaseToolState;
 
-impl<T: ToolActorTrait> Actor for ToolActor<T> {
+impl Actor for BaseToolActor {
     type Msg = ToolMessage;
-    type State = ();
-    type Arguments = (T, ToolConfig);
+    type State = BaseToolState;
+    type Arguments = Config;
     
     async fn pre_start(
         &self,
         _myself: ActorRef<Self::Msg>,
-        (_inner, _config): Self::Arguments,
+        _config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        let tool_name = self.inner.name();
-        
-        if self.config.should_delegate() {
-            // TODO: Register with DelegatorActor
-            // TODO: Create specialized ClientActor
-            tracing::info!(
-                "Tool '{}' configured for delegation to {}",
-                tool_name,
-                self.config.llm_config.as_ref()
-                    .and_then(|c| c.model.as_ref())
-                    .unwrap_or(&"default".to_string())
-            );
-        }
-        
-        tracing::info!("Tool actor '{}' started", tool_name);
-        Ok(())
+        tracing::debug!("Tool actor '{}' starting", self.name);
+        Ok(BaseToolState)
     }
     
     async fn handle(
@@ -77,37 +36,27 @@ impl<T: ToolActorTrait> Actor for ToolActor<T> {
         _state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
-            ToolMessage::Execute { id, params } => {
-                tracing::debug!("Tool '{}' executing with params: {:?}", self.inner.name(), params);
+            ToolMessage::Execute { id, params, chat_ref } => {
+                tracing::info!("Tool '{}' executing with params: {:?}", self.name, params);
                 
-                // Validate parameters
-                if let Err(e) = self.inner.validate_params(&params).await {
-                    tracing::error!("Parameter validation failed: {}", e);
-                    // TODO: Send error result back
-                    return Ok(());
-                }
+                // This is a base implementation - specific tools should override
+                let result = format!("Tool '{}' executed with params: {}", self.name, params);
                 
-                // Execute tool
-                match self.inner.execute(id, params, &self.config).await {
-                    Ok(result) => {
-                        tracing::debug!("Tool '{}' execution successful", self.inner.name());
-                        // TODO: Send result back
-                    }
-                    Err(e) => {
-                        tracing::error!("Tool '{}' execution failed: {}", self.inner.name(), e);
-                        // TODO: Send error result back
-                    }
-                }
+                // Send result back to chat
+                chat_ref.send_message(ChatMessage::ToolResult {
+                    id,
+                    result,
+                })?;
             }
             
             ToolMessage::Cancel { id } => {
-                tracing::info!("Cancelling tool execution: {}", id);
-                // TODO: Implement cancellation
+                tracing::debug!("Cancelling tool '{}' execution: {}", self.name, id);
+                // Most tools will be synchronous, but async tools can override this
             }
             
             ToolMessage::StreamUpdate { id, output } => {
-                tracing::debug!("Stream update for {}: {}", id, output);
-                // TODO: Forward stream updates
+                tracing::debug!("Stream update for '{}' ({}): {}", self.name, id, output);
+                // Tools that support streaming can override this
             }
         }
         
@@ -115,8 +64,11 @@ impl<T: ToolActorTrait> Actor for ToolActor<T> {
     }
 }
 
-impl<T: ToolActorTrait> ToolActor<T> {
-    pub fn new(inner: T, config: ToolConfig) -> Self {
-        Self { inner, config }
+impl BaseToolActor {
+    pub fn new(name: impl Into<String>, config: Config) -> Self {
+        Self {
+            name: name.into(),
+            config,
+        }
     }
 }
