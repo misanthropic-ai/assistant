@@ -231,9 +231,10 @@ async fn register_tools(delegator_ref: &ActorRef<DelegatorMessage>, config: &Con
     
     // Register memory tool
     if is_enabled("memory") {
+        let memory_actor = MemoryActor::new(config.clone()).await?;
         let (memory_ref, _): (ActorRef<ToolMessage>, _) = Actor::spawn(
             Some("tool_memory".to_string()),
-            MemoryActor::new(config.clone()),
+            memory_actor,
             config.clone(),
         )
         .await?;

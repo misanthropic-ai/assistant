@@ -1,7 +1,9 @@
 pub mod actors;
 pub mod config;
+pub mod embeddings;
 pub mod messages;
 pub mod openai_compat;
+pub mod persistence;
 pub mod utils;
 
 // Re-export commonly used types

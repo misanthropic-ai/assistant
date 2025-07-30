@@ -36,9 +36,17 @@ impl Actor for ChatActor {
         _config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Chat actor starting");
+        
+        // Initialize with system prompt
+        let mut messages = Vec::new();
+        messages.push(OpenAIMessage::System {
+            content: self.get_system_prompt(),
+            name: None,
+        });
+        
         Ok(ChatState {
             history: VecDeque::new(),
-            messages: Vec::new(),
+            messages,
             max_history: 100,
             current_request: None,
             current_context: None,
@@ -207,6 +215,45 @@ impl ChatActor {
     pub fn with_delegator_ref(mut self, delegator_ref: ActorRef<DelegatorMessage>) -> Self {
         self.delegator_ref = Some(delegator_ref);
         self
+    }
+    
+    fn get_system_prompt(&self) -> String {
+        r#"You are a helpful AI assistant with access to various tools. 
+
+IMPORTANT: Memory Management
+- You have a memory tool that allows you to store and retrieve information persistently across conversations
+- Use the memory tool to:
+  - Store important facts, concepts, or information the user shares with you
+  - Search your memory when asked about topics you might have stored
+  - Retrieve specific memories when needed
+  - Keep track of user preferences or important context
+
+Memory Tool Guidelines:
+1. When a user shares important information, proactively store it in memory with appropriate metadata
+2. When asked about something, ALWAYS search your memory first before responding from general knowledge
+3. Use semantic search to find related concepts even if keywords don't match exactly
+4. Store memories with descriptive keys and rich metadata for better organization
+5. Periodically check memory stats to understand what information you have stored
+
+Memory Management Operations:
+- CREATE: Use 'store' for auto-generated keys or 'store_with_key' for specific keys
+- READ: Use 'retrieve' for exact key lookup or 'search' for finding related memories
+- UPDATE: Use 'update' to modify existing memories (content and/or metadata)
+- DELETE: Use 'delete' to remove specific memories or 'clear' to remove all
+
+When to use each operation:
+- store_with_key: Creating new memories or completely replacing existing ones
+- update: Modifying parts of existing memories while preserving other data
+- delete: Removing outdated or incorrect information
+- merge_metadata: When updating, set to true to add new metadata fields without losing existing ones
+
+Examples:
+- User: "My favorite programming language is Python" → Store with key "user_favorite_language"
+- User: "Actually, I prefer Rust now" → Update the existing memory
+- User: "Forget what I said about X" → Delete the specific memory
+- User: "What do you know about X?" → Search memory for X before answering
+
+Always be transparent about using the memory tool - let users know when you're storing, updating, or retrieving information."#.to_string()
     }
     
     fn build_tools(&self) -> Vec<Tool> {
@@ -411,22 +458,55 @@ impl ChatActor {
                 })
             ),
             "memory" => (
-                "Store or retrieve from memory",
+                "Store and search information in persistent memory with semantic search",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["store", "retrieve", "clear"],
+                            "enum": ["store", "store_with_key", "retrieve", "search", "list", "update", "delete", "clear", "stats"],
                             "description": "The memory action to perform"
                         },
                         "key": {
                             "type": "string",
-                            "description": "The memory key"
+                            "description": "Memory key (for store_with_key, retrieve, update, delete)"
                         },
-                        "value": {
+                        "content": {
                             "type": "string",
-                            "description": "The value to store (for store action)"
+                            "description": "Content to store or update (for store, store_with_key, update)"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query (for search)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results to return (for search, default: 10)"
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": ["hybrid", "semantic", "keyword", "exact"],
+                            "description": "Search mode (for search, default: hybrid)"
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Metadata to store or update with memory (optional)"
+                        },
+                        "merge_metadata": {
+                            "type": "boolean",
+                            "description": "Merge metadata instead of replacing (for update, default: false)"
+                        },
+                        "metadata_filter": {
+                            "type": "object",
+                            "description": "Filter search by metadata (optional)"
+                        },
+                        "prefix": {
+                            "type": "string",
+                            "description": "Filter list by key prefix (optional)"
+                        },
+                        "session_only": {
+                            "type": "boolean",
+                            "description": "Clear only session memories (for clear, default: false)"
                         }
                     },
                     "required": ["action"]

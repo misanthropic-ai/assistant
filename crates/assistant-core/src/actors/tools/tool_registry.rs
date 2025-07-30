@@ -58,6 +58,22 @@ impl ToolRegistry {
             };
         }
         
+        // Helper macro for async tool creation
+        macro_rules! register_async_tool {
+            ($name:expr, $actor_type:ty) => {
+                if is_tool_enabled($name) {
+                    let actor = <$actor_type>::new(tool_config.clone()).await?;
+                    let (actor_ref, _) = Actor::spawn(
+                        Some($name.to_string()), 
+                        actor, 
+                        tool_config.clone()
+                    ).await?;
+                    tool_actors.insert($name.to_string(), actor_ref);
+                    tracing::info!("Tool '{}' initialized", $name);
+                }
+            };
+        }
+        
         // File system tools
         register_tool!("ls", LsActor);
         register_tool!("read", ReadActor);
@@ -75,7 +91,7 @@ impl ToolRegistry {
         register_tool!("web_fetch", WebFetchActor);
         
         // Utility tools
-        register_tool!("memory", MemoryActor);
+        register_async_tool!("memory", MemoryActor);
         register_tool!("todo", TodoActor);
         
         tracing::info!("Initialized {} tools", tool_actors.len());
