@@ -3,11 +3,24 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use ractor::ActorRef;
 
+/// Display context for routing output
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub enum DisplayContext {
+    /// Command line interface display
+    CLI,
+    /// Terminal UI display
+    TUI,
+    /// REST API response
+    REST { response_id: Uuid },
+    // Future: WebSocket { connection_id: String },
+    // Future: Tauri { window_id: String },
+}
+
 /// Core message types for actor communication
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
     /// User input prompt
-    UserPrompt { id: Uuid, prompt: String },
+    UserPrompt { id: Uuid, prompt: String, context: DisplayContext },
     
     /// Streaming token from LLM
     StreamToken { token: String },
@@ -26,6 +39,9 @@ pub enum ChatMessage {
     
     /// Set delegator actor reference
     SetDelegatorRef(ActorRef<DelegatorMessage>),
+    
+    /// Register a display actor for a context
+    RegisterDisplay { context: DisplayContext, display_ref: ActorRef<ChatMessage> },
 }
 
 /// Tool call information

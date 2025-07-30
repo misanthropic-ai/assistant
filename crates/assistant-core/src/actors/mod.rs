@@ -3,6 +3,7 @@ pub mod chat;
 pub mod client;
 pub mod delegator;
 pub mod tools;
+pub mod display;
 
 /// Common error type for actors
 #[derive(Debug, thiserror::Error)]

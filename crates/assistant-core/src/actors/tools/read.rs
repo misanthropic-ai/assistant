@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
+use crate::utils::path::{resolve_path, validate_path_access};
 use uuid::Uuid;
 
 /// Actor for reading files
@@ -59,18 +60,29 @@ impl Actor for ReadActor {
                     }
                 };
                 
-                // Validate path is absolute
-                let path = Path::new(&read_params.path);
-                if !path.is_absolute() {
+                // Resolve path (handle both absolute and relative paths)
+                let canonical_path = match resolve_path(&read_params.path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Error: {}", e),
+                        })?;
+                        return Ok(());
+                    }
+                };
+                
+                // Validate path access
+                if let Err(e) = validate_path_access(&canonical_path) {
                     chat_ref.send_message(ChatMessage::ToolResult {
                         id,
-                        result: format!("Error: File path must be absolute, but was relative: {}", read_params.path),
+                        result: format!("Error: {}", e),
                     })?;
                     return Ok(());
                 }
                 
                 // Execute read operation
-                let result = match fs::read_to_string(&read_params.path) {
+                let result = match fs::read_to_string(&canonical_path) {
                     Ok(content) => {
                         let mut output = content;
                         

@@ -1,6 +1,8 @@
 pub mod actors;
 pub mod config;
 pub mod messages;
+pub mod openai_compat;
+pub mod utils;
 
 // Re-export commonly used types
 pub use config::Config;
@@ -10,7 +12,6 @@ pub use messages::*;
 pub use ractor;
 pub use serde_json;
 pub use uuid;
-pub use async_openai;
 
 use anyhow::Result;
 use ractor::{Actor, ActorRef};

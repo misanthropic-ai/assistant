@@ -1,25 +1,16 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
-use async_openai::{
-    Client as OpenAIClient,
-    config::OpenAIConfig,
-    types::{
-        ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-        ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
-        ChatCompletionTool, ChatCompletionToolArgs, ChatCompletionToolType,
-        ChatCompletionStreamResponseDelta, ChatCompletionResponseStream,
-    },
-};
-use futures::{StreamExt, Stream};
-use std::pin::Pin;
+use futures::StreamExt;
 use tokio::sync::mpsc;
 use crate::config::Config;
 use crate::messages::{ChatMessage, ToolCall};
+use crate::openai_compat::{OpenAICompatClient, ChatCompletionRequest, ChatMessage as OpenAIMessage, Tool};
 use uuid::Uuid;
+use std::collections::HashMap;
 
 /// Actor for OpenAI API communication
 pub struct ClientActor {
     config: Config,
-    client: OpenAIClient<OpenAIConfig>,
+    client: OpenAICompatClient,
 }
 
 /// Client state tracking active streams
@@ -37,8 +28,8 @@ pub enum ClientMessage {
     /// Generate completion
     Generate {
         id: Uuid,
-        messages: Vec<ChatCompletionRequestMessage>,
-        tools: Vec<ChatCompletionTool>,
+        messages: Vec<OpenAIMessage>,
+        tools: Vec<Tool>,
     },
     
     /// Cancel ongoing generation
@@ -55,7 +46,7 @@ impl Actor for ClientActor {
         _myself: ActorRef<Self::Msg>,
         _config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
-        tracing::info!("Client actor starting with model: {}", self.config.model);
+        tracing::info!("Client actor starting");
         Ok(ClientState {
             active_stream: None,
             cancel_tx: None,
@@ -76,7 +67,7 @@ impl Actor for ClientActor {
             }
             
             ClientMessage::Generate { id, messages, tools } => {
-                tracing::info!("Generating completion for request {}", id);
+                tracing::info!("Starting generation for request {}", id);
                 
                 // Cancel any existing stream
                 if let Some(tx) = state.cancel_tx.take() {
@@ -87,27 +78,21 @@ impl Actor for ClientActor {
                 }
                 
                 // Create cancellation channel
-                let (cancel_tx, mut cancel_rx) = mpsc::channel::<()>(1);
+                let (cancel_tx, cancel_rx) = mpsc::channel::<()>(1);
                 state.cancel_tx = Some(cancel_tx);
                 
-                // Create request
-                let mut request_builder = CreateChatCompletionRequestArgs::default();
-                request_builder
-                    .model(&self.config.model)
-                    .messages(messages)
-                    .temperature(self.config.temperature)
-                    .max_tokens(self.config.max_tokens as u32)
-                    .stream(true);
-                
-                if !tools.is_empty() {
-                    request_builder.tools(tools);
-                }
-                
-                let request = request_builder.build()
-                    .map_err(|e| format!("Failed to build request: {}", e))?;
+                // Create chat completion request
+                let request = ChatCompletionRequest {
+                    model: self.config.model.clone(),
+                    messages,
+                    tools: if tools.is_empty() { None } else { Some(tools) },
+                    temperature: Some(self.config.temperature),
+                    max_tokens: Some(self.config.max_tokens as u32),
+                    stream: true,
+                };
                 
                 // Get stream
-                let stream_result = self.client.chat().create_stream(request).await;
+                let stream_result = self.client.create_chat_completion_stream(request).await;
                 
                 match stream_result {
                     Ok(stream) => {
@@ -151,16 +136,7 @@ impl Actor for ClientActor {
 
 impl ClientActor {
     pub fn new(config: Config) -> Self {
-        // Create OpenAI config
-        let mut openai_config = OpenAIConfig::new()
-            .with_api_key(&config.api_key);
-        
-        // Set base URL if not default
-        if config.base_url != "https://api.openai.com/v1" {
-            openai_config = openai_config.with_api_base(&config.base_url);
-        }
-        
-        let client = OpenAIClient::with_config(openai_config);
+        let client = OpenAICompatClient::new(&config);
         
         Self {
             config,
@@ -169,13 +145,13 @@ impl ClientActor {
     }
     
     async fn handle_stream(
-        mut stream: ChatCompletionResponseStream,
+        mut stream: std::pin::Pin<Box<dyn futures::Stream<Item = Result<crate::openai_compat::ChatCompletionChunk, anyhow::Error>> + Send>>,
         chat_ref: Option<ActorRef<ChatMessage>>,
         request_id: Uuid,
         mut cancel_rx: mpsc::Receiver<()>,
     ) {
         let mut full_response = String::new();
-        let mut pending_tool_calls: Vec<(usize, String, String, String)> = Vec::new();
+        let mut pending_tool_calls: HashMap<usize, (String, String, String)> = HashMap::new();
         
         loop {
             tokio::select! {
@@ -205,30 +181,34 @@ impl ClientActor {
                                 // Handle tool calls
                                 if let Some(tool_calls) = &delta.tool_calls {
                                     for tool_call in tool_calls {
-                                        let index = tool_call.index as usize;
+                                        // Handle negative indices from providers like OpenRouter
+                                        let index = if tool_call.index < 0 {
+                                            0
+                                        } else {
+                                            tool_call.index as usize
+                                        };
                                         
-                                        // Ensure we have space for this index
-                                        while pending_tool_calls.len() <= index {
-                                            pending_tool_calls.push((index, String::new(), String::new(), String::new()));
-                                        }
+                                        // Get or create entry for this index
+                                        let entry = pending_tool_calls.entry(index)
+                                            .or_insert_with(|| (String::new(), String::new(), String::new()));
                                         
                                         if let Some(tc_id) = &tool_call.id {
-                                            pending_tool_calls[index].1 = tc_id.clone();
+                                            entry.0 = tc_id.clone();
                                         }
                                         
                                         if let Some(function) = &tool_call.function {
                                             if let Some(name) = &function.name {
-                                                pending_tool_calls[index].2 = name.clone();
+                                                entry.1 = name.clone();
                                             }
                                             if let Some(args) = &function.arguments {
-                                                pending_tool_calls[index].3.push_str(args);
+                                                entry.2.push_str(args);
                                             }
                                         }
                                     }
                                 }
                                 
                                 // Check if stream is finished
-                                if let Some(reason) = choice.finish_reason {
+                                if let Some(reason) = &choice.finish_reason {
                                     tracing::debug!("Stream finished with reason: {:?}", reason);
                                 }
                             }
@@ -253,10 +233,12 @@ impl ClientActor {
         }
         
         // Send any pending tool calls
-        for (_, id, name, args) in pending_tool_calls {
-            if !name.is_empty() {
+        let mut has_tool_calls = false;
+        for (_index, (id, name, args)) in pending_tool_calls {
+            if !name.is_empty() && !id.is_empty() {
                 if let Ok(parameters) = serde_json::from_str(&args) {
                     if let Some(ref chat_ref) = chat_ref {
+                        has_tool_calls = true;
                         let _ = chat_ref.send_message(ChatMessage::ToolRequest {
                             id: request_id,
                             call: ToolCall {
@@ -270,12 +252,15 @@ impl ClientActor {
             }
         }
         
-        // Send completion
-        if let Some(ref chat_ref) = chat_ref {
-            let _ = chat_ref.send_message(ChatMessage::Complete {
-                id: request_id,
-                response: full_response,
-            });
+        // Only send completion if there are no tool calls
+        // If there are tool calls, completion will be sent after the next response
+        if !has_tool_calls {
+            if let Some(ref chat_ref) = chat_ref {
+                let _ = chat_ref.send_message(ChatMessage::Complete {
+                    id: request_id,
+                    response: full_response,
+                });
+            }
         }
     }
 }

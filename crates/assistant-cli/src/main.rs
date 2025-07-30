@@ -24,15 +24,20 @@ enum Commands {
         params: String,
     },
     
-    /// Send a prompt to the chat agent (not yet implemented)
+    /// Send a prompt to the chat agent
     Prompt {
-        /// The prompt text
+        /// The prompt text or JSON message array
         text: String,
+        
+        /// Maximum iterations for tool calling loop
+        #[arg(short, long, default_value = "10")]
+        max_iterations: usize,
     },
 }
 
 mod tool_runner;
 mod prompt_runner;
+mod actor_init;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,8 +58,8 @@ async fn main() -> Result<()> {
             println!("{}", result);
         }
         
-        Commands::Prompt { text } => {
-            prompt_runner::run_prompt(text, cli.config.as_deref()).await?;
+        Commands::Prompt { text, max_iterations } => {
+            prompt_runner::run_agent_prompt(text, max_iterations, cli.config.as_deref()).await?;
         }
     }
     

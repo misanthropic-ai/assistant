@@ -1,17 +1,156 @@
 use anyhow::{Result, anyhow};
 use assistant_core::{
     actors::{
-        client::{ClientActor, ClientMessage},
-        supervisor::SupervisorActor,
+        display::cli::CLIDisplayActor,
     },
     config::Config,
-    messages::ChatMessage,
-    ractor::{Actor, ActorRef},
+    messages::{ChatMessage, DisplayContext},
+    ractor::Actor,
+    openai_compat::{ChatMessage as OpenAIMessage, UserContent},
 };
 use tokio::sync::mpsc;
+use crate::actor_init;
+
+/// Run a full agent prompt with tool calling support
+pub async fn run_agent_prompt(input: String, max_iterations: usize, config_path: Option<&str>) -> Result<()> {
+    // Load configuration
+    let config = match config_path {
+        Some(path) => Config::load(std::path::Path::new(path))?,
+        None => Config::load_default().unwrap_or_else(|_| {
+            eprintln!("Warning: Could not load config.json, using defaults");
+            Config::default()
+        }),
+    };
+    
+    // Check if we have an API key
+    if config.api_key.is_empty() || config.api_key == "test-api-key" {
+        return Err(anyhow!("No API key found. Please set an API key in config.json"));
+    }
+    
+    tracing::info!("Starting agent with model: {}", config.model);
+    
+    // Parse input as either string or JSON message array
+    let messages = parse_input(&input)?;
+    
+    // Initialize actor system
+    let actors = actor_init::init_actor_system(config).await?;
+    
+    // Create completion channel
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+    
+    // Create CLI display actor
+    let cli_display = CLIDisplayActor::new(completion_tx.clone());
+    let (display_ref, _) = Actor::spawn(
+        Some("cli_display".to_string()),
+        cli_display,
+        completion_tx,
+    )
+    .await?;
+    
+    // Register display actor with chat
+    actors.chat.send_message(ChatMessage::RegisterDisplay {
+        context: DisplayContext::CLI,
+        display_ref,
+    })?;
+    
+    // Send the initial prompt
+    let request_id = assistant_core::uuid::Uuid::new_v4();
+    
+    // If we have multiple messages, we need to send them to the chat actor
+    // For now, we'll just take the last user message as the prompt
+    let prompt = match messages.last() {
+        Some(OpenAIMessage::User { content, .. }) => {
+            // Extract text content from the message
+            match content {
+                UserContent::Text(text) => text.clone(),
+                UserContent::Array(_) => {
+                    return Err(anyhow!("Array content not supported yet"));
+                }
+            }
+        }
+        _ => return Err(anyhow!("No user message found in input")),
+    };
+    
+    actors.chat.send_message(ChatMessage::UserPrompt {
+        id: request_id,
+        prompt,
+        context: DisplayContext::CLI,
+    })?;
+    
+    // Wait for completion
+    // The tool calling loop happens automatically in ChatActor
+    let mut iterations = 0;
+    loop {
+        tokio::select! {
+            _ = completion_rx.recv() => {
+                tracing::debug!("Received completion signal");
+                break;
+            }
+            _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {
+                iterations += 1;
+                if iterations >= max_iterations {
+                    println!("\n⚠️  Max iterations ({}) reached. Stopping.", max_iterations);
+                    break;
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Parse input as either a simple string or JSON message array
+fn parse_input(input: &str) -> Result<Vec<OpenAIMessage>> {
+    let trimmed = input.trim();
+    
+    // Check if it looks like JSON array
+    if trimmed.starts_with('[') {
+        // Parse as JSON array
+        let json_messages: Vec<assistant_core::serde_json::Value> = assistant_core::serde_json::from_str(trimmed)?;
+        
+        let mut messages = Vec::new();
+        for json_msg in json_messages {
+            let role = json_msg.get("role")
+                .and_then(|r| r.as_str())
+                .ok_or_else(|| anyhow!("Message missing 'role' field"))?;
+                
+            let content = json_msg.get("content")
+                .and_then(|c| c.as_str())
+                .ok_or_else(|| anyhow!("Message missing 'content' field"))?;
+                
+            let message = match role {
+                "system" => OpenAIMessage::System {
+                    content: content.to_string(),
+                    name: json_msg.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()),
+                },
+                "user" => OpenAIMessage::User {
+                    content: UserContent::Text(content.to_string()),
+                    name: json_msg.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()),
+                },
+                "assistant" => OpenAIMessage::Assistant {
+                    content: Some(content.to_string()),
+                    name: json_msg.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()),
+                    tool_calls: None,
+                },
+                _ => return Err(anyhow!("Unknown message role: {}", role)),
+            };
+            messages.push(message);
+        }
+        
+        Ok(messages)
+    } else {
+        // Simple string prompt
+        Ok(vec![
+            OpenAIMessage::User {
+                content: UserContent::Text(input.to_string()),
+                name: None,
+            }
+        ])
+    }
+}
 
 /// Run a simple prompt without tools to test the OpenAI client
-pub async fn run_prompt(prompt: String, config_path: Option<&str>) -> Result<()> {
+pub async fn _run_simple_prompt(prompt: String, config_path: Option<&str>) -> Result<()> {
     // Load configuration
     let config = match config_path {
         Some(path) => Config::load(std::path::Path::new(path))?,
@@ -29,13 +168,13 @@ pub async fn run_prompt(prompt: String, config_path: Option<&str>) -> Result<()>
     tracing::info!("Starting prompt runner with model: {}", config.model);
     
     // Create supervisor
-    let supervisor = SupervisorActor::new(config.clone());
-    let (supervisor_ref, _) = Actor::spawn(Some("supervisor".to_string()), supervisor, config.clone())
+    let supervisor = assistant_core::actors::supervisor::SupervisorActor::new(config.clone());
+    let (_supervisor_ref, _) = Actor::spawn(Some("supervisor".to_string()), supervisor, config.clone())
         .await
         .map_err(|e| anyhow!("Failed to spawn supervisor: {}", e))?;
     
     // Create client actor
-    let client_actor = ClientActor::new(config.clone());
+    let client_actor = assistant_core::actors::client::ClientActor::new(config.clone());
     let (client_ref, _) = Actor::spawn(
         Some("client".to_string()),
         client_actor,
@@ -61,7 +200,7 @@ pub async fn run_prompt(prompt: String, config_path: Option<&str>) -> Result<()>
         
         async fn pre_start(
             &self,
-            _myself: ActorRef<Self::Msg>,
+            _myself: assistant_core::ractor::ActorRef<Self::Msg>,
             _sender: Self::Arguments,
         ) -> Result<Self::State, assistant_core::ractor::ActorProcessingErr> {
             Ok(ResponseCollectorState)
@@ -69,7 +208,7 @@ pub async fn run_prompt(prompt: String, config_path: Option<&str>) -> Result<()>
         
         async fn handle(
             &self,
-            _myself: ActorRef<Self::Msg>,
+            _myself: assistant_core::ractor::ActorRef<Self::Msg>,
             msg: Self::Msg,
             _state: &mut Self::State,
         ) -> Result<(), assistant_core::ractor::ActorProcessingErr> {
@@ -100,17 +239,15 @@ pub async fn run_prompt(prompt: String, config_path: Option<&str>) -> Result<()>
     .map_err(|e| anyhow!("Failed to spawn collector: {}", e))?;
     
     // Set the chat ref on the client
+    use assistant_core::actors::client::ClientMessage;
     client_ref.send_message(ClientMessage::SetChatRef(collector_ref))
         .map_err(|e| anyhow!("Failed to set chat ref: {}", e))?;
     
     // Create user message
-    use assistant_core::async_openai::types::{ChatCompletionRequestUserMessage, ChatCompletionRequestMessage};
-    let user_message = ChatCompletionRequestMessage::User(
-        ChatCompletionRequestUserMessage {
-            content: prompt.clone().into(),
-            name: None,
-        }
-    );
+    let user_message = OpenAIMessage::User {
+        content: UserContent::Text(prompt.clone()),
+        name: None,
+    };
     
     // Send the prompt
     client_ref.send_message(ClientMessage::Generate {

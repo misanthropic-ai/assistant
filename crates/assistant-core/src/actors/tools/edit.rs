@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
+use crate::utils::path::{resolve_path, validate_path_access};
 use uuid::Uuid;
 
 /// Actor for editing files by replacing text
@@ -63,18 +64,37 @@ impl Actor for EditActor {
                     }
                 };
                 
-                // Validate path is absolute
-                let path = Path::new(&edit_params.file_path);
-                if !path.is_absolute() {
+                // Resolve path (handle both absolute and relative paths)
+                let canonical_path = match resolve_path(&edit_params.file_path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Error: {}", e),
+                        })?;
+                        return Ok(());
+                    }
+                };
+                
+                // Validate path access
+                if let Err(e) = validate_path_access(&canonical_path) {
                     chat_ref.send_message(ChatMessage::ToolResult {
                         id,
-                        result: format!("Error: File path must be absolute, but was relative: {}", edit_params.file_path),
+                        result: format!("Error: {}", e),
                     })?;
                     return Ok(());
                 }
                 
+                // Update edit_params with the canonical path
+                let canonical_params = EditParams {
+                    file_path: canonical_path.to_string_lossy().to_string(),
+                    old_string: edit_params.old_string,
+                    new_string: edit_params.new_string,
+                    expected_replacements: edit_params.expected_replacements,
+                };
+                
                 // Execute edit operation
-                let result = match self.edit_file(&edit_params) {
+                let result = match self.edit_file(&canonical_params) {
                     Ok(info) => info,
                     Err(e) => format!("Error: {}", e),
                 };

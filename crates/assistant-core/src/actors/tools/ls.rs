@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
+use crate::utils::path::{resolve_path, validate_path_access};
 use uuid::Uuid;
 use chrono::{DateTime, Local};
 
@@ -70,18 +71,37 @@ impl Actor for LsActor {
                     }
                 };
                 
-                // Validate path is absolute
-                let path = Path::new(&ls_params.path);
-                if !path.is_absolute() {
+                // Resolve path (handle both absolute and relative paths)
+                let canonical_path = match resolve_path(&ls_params.path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Error: {}", e),
+                        })?;
+                        return Ok(());
+                    }
+                };
+                
+                // Validate path access
+                if let Err(e) = validate_path_access(&canonical_path) {
                     chat_ref.send_message(ChatMessage::ToolResult {
                         id,
-                        result: format!("Error: Path must be absolute, but was relative: {}", ls_params.path),
+                        result: format!("Error: {}", e),
                     })?;
                     return Ok(());
                 }
                 
+                // Update ls_params with the canonical path for consistency
+                let canonical_path_str = canonical_path.to_string_lossy().to_string();
+                let updated_params = LsParams {
+                    path: canonical_path_str.clone(),
+                    ignore: ls_params.ignore,
+                    respect_git_ignore: ls_params.respect_git_ignore,
+                };
+                
                 // Execute ls operation
-                let result = match self.list_directory(&ls_params) {
+                let result = match self.list_directory(&updated_params) {
                     Ok(entries) => {
                         if entries.is_empty() {
                             format!("Directory {} is empty", ls_params.path)

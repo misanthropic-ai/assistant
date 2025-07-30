@@ -1,16 +1,10 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use std::collections::VecDeque;
-use async_openai::types::{
-    ChatCompletionRequestMessage,
-    ChatCompletionRequestUserMessageArgs, ChatCompletionRequestAssistantMessageArgs,
-    ChatCompletionRequestToolMessageArgs,
-    ChatCompletionTool, ChatCompletionToolArgs, ChatCompletionToolType,
-    FunctionObjectArgs,
-};
 use crate::config::Config;
-use crate::messages::{ChatMessage, ToolCall};
+use crate::messages::{ChatMessage, DisplayContext};
 use crate::actors::client::ClientMessage;
 use crate::messages::DelegatorMessage;
+use crate::openai_compat::{ChatMessage as OpenAIMessage, Tool, FunctionDef, UserContent};
 use uuid::Uuid;
 
 /// Main chat actor managing conversation flow
@@ -23,10 +17,12 @@ pub struct ChatActor {
 /// Chat actor state
 pub struct ChatState {
     history: VecDeque<ChatMessage>,
-    messages: Vec<ChatCompletionRequestMessage>,
+    messages: Vec<OpenAIMessage>,
     max_history: usize,
     current_request: Option<Uuid>,
+    current_context: Option<DisplayContext>,
     delegator_ref: Option<ActorRef<DelegatorMessage>>,
+    display_refs: std::collections::HashMap<DisplayContext, ActorRef<ChatMessage>>,
 }
 
 impl Actor for ChatActor {
@@ -45,7 +41,9 @@ impl Actor for ChatActor {
             messages: Vec::new(),
             max_history: 100,
             current_request: None,
+            current_context: None,
             delegator_ref: self.delegator_ref.clone(),
+            display_refs: std::collections::HashMap::new(),
         })
     }
     
@@ -55,18 +53,35 @@ impl Actor for ChatActor {
         msg: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
+        // Send to display actors if applicable
+        match &msg {
+            ChatMessage::StreamToken { .. } |
+            ChatMessage::ToolRequest { .. } |
+            ChatMessage::ToolResult { .. } |
+            ChatMessage::Complete { .. } |
+            ChatMessage::Error { .. } => {
+                if let Some(context) = &state.current_context {
+                    if let Some(display_ref) = state.display_refs.get(context) {
+                        let _ = display_ref.send_message(msg.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
+        
         match msg {
-            ChatMessage::UserPrompt { id, prompt } => {
+            ChatMessage::UserPrompt { id, prompt, context } => {
                 tracing::info!("Received user prompt: {}", prompt);
-                state.history.push_back(ChatMessage::UserPrompt { id, prompt: prompt.clone() });
+                state.current_context = Some(context.clone());
+                state.history.push_back(ChatMessage::UserPrompt { id, prompt: prompt.clone(), context });
                 state.current_request = Some(id);
                 
                 // Add user message to conversation
-                let user_msg = ChatCompletionRequestUserMessageArgs::default()
-                    .content(prompt)
-                    .build()
-                    .map_err(|e| format!("Failed to build user message: {}", e))?;
-                state.messages.push(ChatCompletionRequestMessage::User(user_msg));
+                let user_msg = OpenAIMessage::User {
+                    content: UserContent::Text(prompt),
+                    name: None,
+                };
+                state.messages.push(user_msg);
                 
                 // Build tools list
                 let tools = self.build_tools();
@@ -109,12 +124,11 @@ impl Actor for ChatActor {
                 state.history.push_back(ChatMessage::ToolResult { id, result: result.clone() });
                 
                 // Add tool result to messages
-                let tool_msg = ChatCompletionRequestToolMessageArgs::default()
-                    .content(result)
-                    .tool_call_id(id.to_string())
-                    .build()
-                    .map_err(|e| format!("Failed to build tool message: {}", e))?;
-                state.messages.push(ChatCompletionRequestMessage::Tool(tool_msg));
+                let tool_msg = OpenAIMessage::Tool {
+                    content: result,
+                    tool_call_id: id.to_string(),
+                };
+                state.messages.push(tool_msg);
                 
                 // Continue conversation
                 if let Some(ref client_ref) = self.client_ref {
@@ -131,12 +145,15 @@ impl Actor for ChatActor {
                 tracing::info!("Response complete");
                 state.history.push_back(ChatMessage::Complete { id, response: response.clone() });
                 
-                // Add assistant message to conversation
-                let assistant_msg = ChatCompletionRequestAssistantMessageArgs::default()
-                    .content(response)
-                    .build()
-                    .map_err(|e| format!("Failed to build assistant message: {}", e))?;
-                state.messages.push(ChatCompletionRequestMessage::Assistant(assistant_msg));
+                // Only add assistant message if there's actual content
+                if !response.is_empty() {
+                    let assistant_msg = OpenAIMessage::Assistant {
+                        content: Some(response),
+                        name: None,
+                        tool_calls: None,
+                    };
+                    state.messages.push(assistant_msg);
+                }
                 
                 // Clear current request
                 state.current_request = None;
@@ -157,6 +174,11 @@ impl Actor for ChatActor {
             ChatMessage::SetDelegatorRef(delegator_ref) => {
                 tracing::debug!("Setting delegator actor reference");
                 state.delegator_ref = Some(delegator_ref);
+            }
+            
+            ChatMessage::RegisterDisplay { context, display_ref } => {
+                tracing::debug!("Registering display actor for context: {:?}", context);
+                state.display_refs.insert(context, display_ref);
             }
         }
         
@@ -183,7 +205,7 @@ impl ChatActor {
         self
     }
     
-    fn build_tools(&self) -> Vec<ChatCompletionTool> {
+    fn build_tools(&self) -> Vec<Tool> {
         let mut tools = Vec::new();
         
         // Define tools based on config
@@ -208,7 +230,7 @@ impl ChatActor {
         tools
     }
     
-    fn create_tool_definition(&self, tool_name: &str) -> ChatCompletionTool {
+    fn create_tool_definition(&self, tool_name: &str) -> Tool {
         // Create tool definitions matching qwen-code tools
         let (description, parameters) = match tool_name {
             "read" => (
@@ -229,7 +251,7 @@ impl ChatActor {
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "path": {
+                        "file_path": {
                             "type": "string",
                             "description": "The path to the file to edit"
                         },
@@ -242,7 +264,7 @@ impl ChatActor {
                             "description": "The string to replace it with"
                         }
                     },
-                    "required": ["path", "old_string", "new_string"]
+                    "required": ["file_path", "old_string", "new_string"]
                 })
             ),
             "write" => (
@@ -250,7 +272,7 @@ impl ChatActor {
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "path": {
+                        "file_path": {
                             "type": "string",
                             "description": "The path to the file to write"
                         },
@@ -259,7 +281,7 @@ impl ChatActor {
                             "description": "The content to write to the file"
                         }
                     },
-                    "required": ["path", "content"]
+                    "required": ["file_path", "content"]
                 })
             ),
             "ls" => (
@@ -402,17 +424,13 @@ impl ChatActor {
             )
         };
         
-        let function = FunctionObjectArgs::default()
-            .name(tool_name)
-            .description(description)
-            .parameters(parameters)
-            .build()
-            .unwrap();
-        
-        ChatCompletionToolArgs::default()
-            .r#type(ChatCompletionToolType::Function)
-            .function(function)
-            .build()
-            .unwrap()
+        Tool {
+            tool_type: "function".to_string(),
+            function: FunctionDef {
+                name: tool_name.to_string(),
+                description: description.to_string(),
+                parameters,
+            },
+        }
     }
 }
