@@ -5,6 +5,7 @@ use grep::regex::RegexMatcher;
 use grep::searcher::{Searcher, SearcherBuilder, Sink, SinkMatch};
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
+use crate::utils::path::{resolve_path, validate_path_access};
 
 /// Actor for searching file contents using regular expressions
 pub struct GrepActor {
@@ -175,14 +176,18 @@ impl GrepActor {
         // Determine search path
         let search_path = match &params.path {
             Some(p) => {
-                let path = Path::new(p);
-                if !path.is_absolute() {
-                    return Err(format!("Path must be absolute, but was relative: {}", p));
+                // Resolve the path (handles both absolute and relative)
+                let resolved = match resolve_path(p) {
+                    Ok(path) => path,
+                    Err(e) => return Err(format!("{}", e)),
+                };
+                
+                // Validate path access
+                if let Err(e) = validate_path_access(&resolved) {
+                    return Err(format!("{}", e));
                 }
-                if !path.exists() {
-                    return Err(format!("Path does not exist: {}", p));
-                }
-                p.clone()
+                
+                resolved.to_string_lossy().to_string()
             }
             None => {
                 // Use current working directory

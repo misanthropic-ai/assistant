@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::messages::{DelegatorMessage, ToolCall, ChatMessage};
 use crate::actors::tools::ToolMessage;
 use crate::actors::client::{ClientActor, ClientMessage};
+use crate::actors::sub_agent::{SubAgentActor, SubAgentMessage};
 use uuid::Uuid;
 
 /// Actor that routes tools to specialized LLMs
@@ -15,8 +16,11 @@ pub struct DelegatorActor {
 pub struct DelegatorState {
     /// Map of tool names to their local tool actors
     tool_actors: HashMap<String, ActorRef<ToolMessage>>,
-    /// Map of tool names to their delegated client actors
-    delegated_clients: HashMap<String, ActorRef<ClientMessage>>,
+    /// Map of tool names to their sub-agent actors
+    sub_agents: HashMap<String, ActorRef<SubAgentMessage>>,
+    
+    /// Active delegated requests
+    active_requests: HashMap<Uuid, ActorRef<ChatMessage>>,
 }
 
 impl Actor for DelegatorActor {
@@ -26,31 +30,44 @@ impl Actor for DelegatorActor {
     
     async fn pre_start(
         &self,
-        _myself: ActorRef<Self::Msg>,
+        myself: ActorRef<Self::Msg>,
         config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Delegator actor starting");
         
-        // TODO: Create client actors for each delegated tool based on config
-        let mut delegated_clients = HashMap::new();
+        let mut sub_agents = HashMap::new();
         
-        // Create delegated client actors for tools that need specialized LLMs
+        // Create sub-agent actors for tools that need delegation
         for (tool_name, tool_config) in &config.tools.configs {
-            if tool_config.delegate && tool_config.llm_config.is_some() {
-                // TODO: Create specialized client actor
-                tracing::info!("Tool {} is configured for delegation", tool_name);
+            if tool_config.should_delegate() {
+                tracing::info!("Creating sub-agent for tool: {}", tool_name);
+                
+                let sub_agent = SubAgentActor::new(
+                    tool_name.clone(),
+                    tool_config.clone(),
+                    config.clone(),
+                );
+                
+                let (sub_agent_ref, _) = Actor::spawn(
+                    Some(format!("sub-agent-{}", tool_name)),
+                    sub_agent,
+                    (),
+                ).await?;
+                
+                sub_agents.insert(tool_name.clone(), sub_agent_ref);
             }
         }
         
         Ok(DelegatorState {
             tool_actors: HashMap::new(),
-            delegated_clients,
+            sub_agents,
+            active_requests: HashMap::new(),
         })
     }
     
     async fn handle(
         &self,
-        _myself: ActorRef<Self::Msg>,
+        myself: ActorRef<Self::Msg>,
         msg: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
@@ -66,23 +83,41 @@ impl Actor for DelegatorActor {
                 // Check if tool should be delegated
                 let tool_config = self.config.tools.configs.get(&call.tool_name);
                 let should_delegate = tool_config
-                    .map(|tc| tc.delegate && tc.llm_config.is_some())
+                    .map(|tc| tc.should_delegate())
                     .unwrap_or(false);
                 
                 if should_delegate {
-                    // Route to delegated client
-                    if let Some(delegated_client) = state.delegated_clients.get(&call.tool_name) {
-                        // TODO: Format tool call as specialized prompt
-                        tracing::info!("Delegating {} to specialized LLM", call.tool_name);
-                        // For now, just return an error
-                        chat_ref.send_message(ChatMessage::Error {
+                    // Route to sub-agent
+                    if let Some(sub_agent_ref) = state.sub_agents.get(&call.tool_name) {
+                        tracing::info!("Delegating {} to sub-agent for request {}", call.tool_name, id);
+                        
+                        // Store the chat reference for later response
+                        state.active_requests.insert(id, chat_ref.clone());
+                        
+                        // Extract the query from parameters
+                        let query = if call.tool_name == "web_search" {
+                            call.parameters.get("query")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string()
+                        } else {
+                            // For other tools, convert the entire parameters to a query
+                            serde_json::to_string(&call.parameters).unwrap_or_default()
+                        };
+                        
+                        tracing::info!("Sending query to sub-agent {}: {}", call.tool_name, query);
+                        
+                        // Send to sub-agent
+                        sub_agent_ref.send_message(SubAgentMessage::ExecuteQuery {
                             id,
-                            error: format!("Tool delegation not yet implemented for: {}", call.tool_name),
+                            query,
+                            reply_to: myself.clone(),
                         })?;
                     } else {
+                        tracing::error!("Sub-agent not found for tool: {}", call.tool_name);
                         chat_ref.send_message(ChatMessage::Error {
                             id,
-                            error: format!("Delegated client not found for: {}", call.tool_name),
+                            error: format!("Sub-agent not found for: {}", call.tool_name),
                         })?;
                     }
                 } else {
@@ -100,6 +135,22 @@ impl Actor for DelegatorActor {
                             error: format!("Tool not found: {}", call.tool_name),
                         })?;
                     }
+                }
+            }
+            
+            DelegatorMessage::SubAgentResponse { id, result } => {
+                tracing::info!("Received sub-agent response for request {}: {}", id, result);
+                
+                // Get the chat reference for this request
+                if let Some(chat_ref) = state.active_requests.remove(&id) {
+                    tracing::info!("Forwarding sub-agent result to chat actor for request {}", id);
+                    // Send the result back to the chat actor
+                    chat_ref.send_message(ChatMessage::ToolResult {
+                        id,
+                        result,
+                    })?;
+                } else {
+                    tracing::warn!("No active request found for sub-agent response {}", id);
                 }
             }
         }

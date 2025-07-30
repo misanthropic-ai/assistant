@@ -11,7 +11,7 @@ pub mod grep;
 pub mod bash;
 pub mod web_search;
 pub mod web_fetch;
-pub mod todo_write;
+pub mod todo;
 pub mod memory;
 pub mod read_many_files;
 
@@ -29,6 +29,6 @@ pub use grep::GrepActor;
 pub use bash::BashActor;
 pub use web_search::WebSearchActor;
 pub use web_fetch::WebFetchActor;
-pub use todo_write::TodoWriteActor;
+pub use todo::TodoActor;
 pub use memory::MemoryActor;
 pub use read_many_files::ReadManyFilesActor;

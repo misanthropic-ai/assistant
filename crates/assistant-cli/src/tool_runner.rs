@@ -176,8 +176,8 @@ pub async fn run_tool(tool_name: &str, params: Value, config_path: Option<&str>)
             ).await?;
             actor_ref
         }
-        "todo_write" => {
-            let actor = TodoWriteActor::new(config.clone());
+        "todo" => {
+            let actor = TodoActor::new(config.clone());
             let (actor_ref, _) = Actor::spawn(
                 Some(tool_name.to_string()),
                 actor,

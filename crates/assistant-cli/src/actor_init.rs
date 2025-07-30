@@ -16,7 +16,7 @@ use assistant_core::{
             web_search::WebSearchActor,
             web_fetch::WebFetchActor,
             memory::MemoryActor,
-            todo_write::TodoWriteActor,
+            todo::TodoActor,
             read_many_files::ReadManyFilesActor,
         },
     },
@@ -243,16 +243,16 @@ async fn register_tools(delegator_ref: &ActorRef<DelegatorMessage>, config: &Con
         })?;
     }
     
-    // Register todo_write tool
-    if is_enabled("todo_write") {
+    // Register todo tool
+    if is_enabled("todo") {
         let (todo_ref, _): (ActorRef<ToolMessage>, _) = Actor::spawn(
-            Some("tool_todo_write".to_string()),
-            TodoWriteActor::new(config.clone()),
+            Some("tool_todo".to_string()),
+            TodoActor::new(config.clone()),
             config.clone(),
         )
         .await?;
         delegator_ref.send_message(DelegatorMessage::RegisterTool {
-            name: "todo_write".to_string(),
+            name: "todo".to_string(),
             actor_ref: todo_ref,
         })?;
     }

@@ -73,6 +73,7 @@ impl Actor for WebSearchActor {
                 let result = self.search(&search_params).await;
                 
                 // Send result back to chat
+                tracing::info!("Sending web search result back to chat actor");
                 chat_ref.send_message(ChatMessage::ToolResult {
                     id,
                     result,
@@ -114,21 +115,30 @@ impl WebSearchActor {
         let encoded_query = urlencoding::encode(&params.query);
         let url = format!("https://html.duckduckgo.com/html/?q={}", encoded_query);
         
-        // Perform search
-        match self.client.get(&url).send().await {
-            Ok(response) => {
+        tracing::info!("Performing web search: {}", url);
+        
+        // Perform search with timeout
+        let timeout_duration = std::time::Duration::from_secs(10);
+        match tokio::time::timeout(timeout_duration, self.client.get(&url).send()).await {
+            Ok(Ok(response)) => {
                 match response.text().await {
                     Ok(html) => {
+                        tracing::info!("Got search response, parsing results");
                         let results = self.parse_search_results(&html, params.limit);
-                        self.format_results(&params.query, results)
+                        let formatted = self.format_results(&params.query, results);
+                        tracing::info!("Search completed successfully");
+                        formatted
                     }
                     Err(e) => {
                         format!("Error reading response: {}", e)
                     }
                 }
             }
-            Err(e) => {
+            Ok(Err(e)) => {
                 format!("Error performing search: {}", e)
+            }
+            Err(_) => {
+                format!("Error: Search request timed out after 10 seconds")
             }
         }
     }

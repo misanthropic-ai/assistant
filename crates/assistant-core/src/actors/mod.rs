@@ -4,6 +4,9 @@ pub mod client;
 pub mod delegator;
 pub mod tools;
 pub mod display;
+pub mod sub_agent;
+pub mod sub_agent_display;
+pub mod sub_agent_chat;
 
 /// Common error type for actors
 #[derive(Debug, thiserror::Error)]

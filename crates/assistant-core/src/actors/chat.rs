@@ -115,12 +115,13 @@ impl Actor for ChatActor {
                         chat_ref: myself.clone(),
                     })?;
                 } else {
+                    tracing::error!("Delegator actor not set for tool request: {}", call.tool_name);
                     return Err("Delegator actor not set".into());
                 }
             }
             
             ChatMessage::ToolResult { id, result } => {
-                tracing::info!("Tool result received");
+                tracing::info!("Tool result received for request {}: {}", id, result);
                 state.history.push_back(ChatMessage::ToolResult { id, result: result.clone() });
                 
                 // Add tool result to messages
@@ -132,12 +133,15 @@ impl Actor for ChatActor {
                 
                 // Continue conversation
                 if let Some(ref client_ref) = self.client_ref {
+                    tracing::info!("Continuing conversation after tool result for request {}", id);
                     let tools = self.build_tools();
                     client_ref.send_message(ClientMessage::Generate {
                         id,
                         messages: state.messages.clone(),
                         tools,
                     })?;
+                } else {
+                    tracing::error!("No client ref to continue conversation after tool result");
                 }
             }
             
@@ -211,7 +215,7 @@ impl ChatActor {
         // Define tools based on config
         let tool_names = [
             "read", "edit", "write", "ls", "glob", "grep",
-            "bash", "web_search", "web_fetch", "todo_write", "memory"
+            "bash", "web_search", "web_fetch", "todo", "memory"
         ];
         
         for tool_name in &tool_names {
@@ -345,52 +349,65 @@ impl ChatActor {
                 })
             ),
             "web_search" => (
-                "Search the web for information",
+                "Search the web for information. Supports complex natural language queries for comprehensive research. This tool uses a dedicated sub-agent that can perform multiple searches and fetch pages to gather detailed information",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "The search query"
+                            "description": "The search query. Can be a simple search term or a detailed natural language request for comprehensive information gathering. The sub-agent will interpret your request and use multiple searches if needed"
                         }
                     },
                     "required": ["query"]
                 })
             ),
             "web_fetch" => (
-                "Fetch content from a URL",
+                "Fetch content from a URL and process it with a prompt",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
                         "url": {
                             "type": "string",
                             "description": "The URL to fetch"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "What to extract or look for in the fetched content"
                         }
                     },
-                    "required": ["url"]
+                    "required": ["url", "prompt"]
                 })
             ),
-            "todo_write" => (
-                "Update the todo list",
+            "todo" => (
+                "Manage todo list with various operations",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "todos": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                    "content": {"type": "string"},
-                                    "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
-                                    "priority": {"type": "string", "enum": ["low", "medium", "high"]}
-                                },
-                                "required": ["id", "content", "status", "priority"]
-                            },
-                            "description": "The list of todos"
+                        "operation": {
+                            "type": "string",
+                            "enum": ["list", "add", "update", "remove", "clear", "stats"],
+                            "description": "The operation to perform"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content for add operation"
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": ["low", "medium", "high"],
+                            "description": "Priority for add/update/list operations"
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                            "description": "Status for update/list/clear operations"
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Todo ID for update/remove operations"
                         }
                     },
-                    "required": ["todos"]
+                    "required": ["operation"]
                 })
             ),
             "memory" => (

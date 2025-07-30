@@ -9,6 +9,9 @@ license.workspace = true
 anyhow = "1.0.98"
 async-stream = "0.3.6"
 async-trait = "0.1.88"
+candle-core = "0.9.1"
+candle-nn = "0.9.1"
+candle-transformers = "0.9.1"
 chrono = { version = "0.4.41", features = ["serde"] }
 dirs = "6.0.0"
 dotenvy = "0.15.7"
@@ -19,6 +22,7 @@ glob = "0.3.2"
 globset = "0.4.16"
 grep = "0.3.2"
 html2text = "0.15.2"
+ndarray = "0.16.1"
 ractor = "0.15.6"
 reqwest = { version = "0.12.22", features = ["stream", "json"] }
 scraper = "0.23.1"
@@ -26,6 +30,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"
 shell-words = "1.1.0"
 similar = "2.7.0"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
 strip-ansi-escapes = "0.2.1"
 syntect = "5.2.0"
 thiserror = "2.0.12"

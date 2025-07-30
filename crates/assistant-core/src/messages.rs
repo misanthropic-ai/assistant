@@ -12,6 +12,8 @@ pub enum DisplayContext {
     TUI,
     /// REST API response
     REST { response_id: Uuid },
+    /// Sub-agent internal display
+    SubAgent,
     // Future: WebSocket { connection_id: String },
     // Future: Tauri { window_id: String },
 }
@@ -129,6 +131,12 @@ pub enum DelegatorMessage {
     RegisterTool {
         name: String,
         actor_ref: ActorRef<ToolMessage>,
+    },
+    
+    /// Response from a sub-agent
+    SubAgentResponse {
+        id: Uuid,
+        result: String,
     },
 }
 

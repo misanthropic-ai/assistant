@@ -76,7 +76,7 @@ impl ToolRegistry {
         
         // Utility tools
         register_tool!("memory", MemoryActor);
-        register_tool!("todo_write", TodoWriteActor);
+        register_tool!("todo", TodoActor);
         
         tracing::info!("Initialized {} tools", tool_actors.len());
         Ok(tool_actors)
@@ -86,7 +86,7 @@ impl ToolRegistry {
     pub fn available_tools() -> Vec<&'static str> {
         vec![
             "ls", "read", "write", "edit", "glob", "grep", "read_many_files",
-            "bash", "web_search", "web_fetch", "memory", "todo_write"
+            "bash", "web_search", "web_fetch", "memory", "todo"
         ]
     }
     

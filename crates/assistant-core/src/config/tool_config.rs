@@ -12,9 +12,20 @@ pub struct ToolConfig {
     #[serde(default)]
     pub delegate: bool,
     
-    /// LLM configuration for delegated tools
-    #[serde(flatten)]
-    pub llm_config: Option<LLMConfig>,
+    /// API key for delegated tool
+    pub api_key: Option<String>,
+    
+    /// Base URL for delegated tool
+    pub base_url: Option<String>,
+    
+    /// Model for delegated tool
+    pub model: Option<String>,
+    
+    /// Temperature for delegated tool
+    pub temperature: Option<f32>,
+    
+    /// System prompt for delegated tool
+    pub system_prompt: Option<String>,
     
     /// Tool-specific settings
     #[serde(flatten)]
@@ -50,7 +61,7 @@ fn default_true() -> bool {
 impl ToolConfig {
     /// Check if this tool should be delegated to a specialized LLM
     pub fn should_delegate(&self) -> bool {
-        self.delegate && self.llm_config.is_some()
+        self.delegate && self.api_key.is_some() && self.model.is_some()
     }
     
     /// Get a setting value
@@ -65,7 +76,11 @@ impl Default for ToolConfig {
         Self {
             enabled: true,
             delegate: false,
-            llm_config: None,
+            api_key: None,
+            base_url: None,
+            model: None,
+            temperature: None,
+            system_prompt: None,
             settings: HashMap::new(),
         }
     }
@@ -83,14 +98,11 @@ impl ToolConfig {
         Self {
             enabled: true,
             delegate: true,
-            llm_config: Some(LLMConfig {
-                api_key: Some(api_key),
-                base_url: None,
-                model: Some(model),
-                temperature: None,
-                max_tokens: None,
-                system_prompt: Some(system_prompt),
-            }),
+            api_key: Some(api_key),
+            base_url: None,
+            model: Some(model),
+            temperature: None,
+            system_prompt: Some(system_prompt),
             settings: HashMap::new(),
         }
     }

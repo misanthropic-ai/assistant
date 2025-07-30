@@ -256,11 +256,14 @@ impl ClientActor {
         // If there are tool calls, completion will be sent after the next response
         if !has_tool_calls {
             if let Some(ref chat_ref) = chat_ref {
+                tracing::info!("Sending Complete message for request {} with response: {}", request_id, full_response);
                 let _ = chat_ref.send_message(ChatMessage::Complete {
                     id: request_id,
                     response: full_response,
                 });
             }
+        } else {
+            tracing::info!("Not sending Complete message for request {} - has tool calls", request_id);
         }
     }
 }
