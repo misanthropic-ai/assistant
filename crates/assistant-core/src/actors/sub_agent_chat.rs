@@ -1,7 +1,7 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use std::collections::{VecDeque, HashMap};
 use crate::config::Config;
-use crate::messages::{ChatMessage, DisplayContext, ToolMessage, ToolCall};
+use crate::messages::{ChatMessage, DisplayContext, ToolMessage};
 use crate::actors::client::ClientMessage;
 use crate::openai_compat::{ChatMessage as OpenAIMessage, Tool, FunctionDef, UserContent};
 use uuid::Uuid;
@@ -187,6 +187,9 @@ impl Actor for SubAgentChatActor {
             // These messages are not used in SubAgentChat
             ChatMessage::SetDelegatorRef(_) => {
                 tracing::debug!("SubAgentChat ignoring SetDelegatorRef - no delegator needed");
+            }
+            ChatMessage::SetPersistenceRef(_) => {
+                tracing::debug!("SubAgentChat ignoring SetPersistenceRef - no persistence needed");
             }
         }
         

@@ -92,7 +92,9 @@ impl ToolRegistry {
         
         // Utility tools
         register_async_tool!("memory", MemoryActor);
-        register_tool!("todo", TodoActor);
+        
+        // Todo tool (session-aware)
+        register_async_tool!("todo", TodoActor);
         
         tracing::info!("Initialized {} tools", tool_actors.len());
         Ok(tool_actors)

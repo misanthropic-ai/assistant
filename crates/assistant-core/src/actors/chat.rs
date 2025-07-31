@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::messages::{ChatMessage, DisplayContext};
 use crate::actors::client::ClientMessage;
 use crate::messages::DelegatorMessage;
+use crate::actors::chat_persistence::ChatPersistenceMessage;
 use crate::openai_compat::{ChatMessage as OpenAIMessage, Tool, FunctionDef, UserContent};
 use uuid::Uuid;
 
@@ -12,6 +13,8 @@ pub struct ChatActor {
     config: Config,
     client_ref: Option<ActorRef<ClientMessage>>,
     delegator_ref: Option<ActorRef<DelegatorMessage>>,
+    persistence_ref: Option<ActorRef<ChatPersistenceMessage>>,
+    session_id: String,
 }
 
 /// Chat actor state
@@ -22,7 +25,9 @@ pub struct ChatState {
     current_request: Option<Uuid>,
     current_context: Option<DisplayContext>,
     delegator_ref: Option<ActorRef<DelegatorMessage>>,
+    persistence_ref: Option<ActorRef<ChatPersistenceMessage>>,
     display_refs: std::collections::HashMap<DisplayContext, ActorRef<ChatMessage>>,
+    session_id: String,
 }
 
 impl Actor for ChatActor {
@@ -51,7 +56,9 @@ impl Actor for ChatActor {
             current_request: None,
             current_context: None,
             delegator_ref: self.delegator_ref.clone(),
+            persistence_ref: self.persistence_ref.clone(),
             display_refs: std::collections::HashMap::new(),
+            session_id: self.session_id.clone(),
         })
     }
     
@@ -84,6 +91,15 @@ impl Actor for ChatActor {
                 state.history.push_back(ChatMessage::UserPrompt { id, prompt: prompt.clone(), context });
                 state.current_request = Some(id);
                 
+                // Persist user prompt
+                if let Some(ref persistence_ref) = state.persistence_ref {
+                    persistence_ref.send_message(ChatPersistenceMessage::PersistUserPrompt {
+                        id,
+                        session_id: state.session_id.clone(),
+                        prompt: prompt.clone(),
+                    })?;
+                }
+                
                 // Add user message to conversation
                 let user_msg = OpenAIMessage::User {
                     content: UserContent::Text(prompt),
@@ -114,6 +130,17 @@ impl Actor for ChatActor {
             ChatMessage::ToolRequest { id, call } => {
                 tracing::info!("Tool request: {}", call.tool_name);
                 state.history.push_back(ChatMessage::ToolRequest { id, call: call.clone() });
+                
+                // Persist tool request
+                if let Some(ref persistence_ref) = state.persistence_ref {
+                    persistence_ref.send_message(ChatPersistenceMessage::PersistToolInteraction {
+                        id,
+                        session_id: state.session_id.clone(),
+                        tool_name: call.tool_name.clone(),
+                        parameters: Some(call.parameters.clone()),
+                        result: None,
+                    })?;
+                }
                 
                 // Route to delegator
                 if let Some(ref delegator_ref) = state.delegator_ref {
@@ -159,6 +186,15 @@ impl Actor for ChatActor {
                 
                 // Only add assistant message if there's actual content
                 if !response.is_empty() {
+                    // Persist assistant response
+                    if let Some(ref persistence_ref) = state.persistence_ref {
+                        persistence_ref.send_message(ChatPersistenceMessage::PersistAssistantResponse {
+                            id,
+                            session_id: state.session_id.clone(),
+                            response: response.clone(),
+                        })?;
+                    }
+                    
                     let assistant_msg = OpenAIMessage::Assistant {
                         content: Some(response),
                         name: None,
@@ -188,6 +224,11 @@ impl Actor for ChatActor {
                 state.delegator_ref = Some(delegator_ref);
             }
             
+            ChatMessage::SetPersistenceRef(persistence_ref) => {
+                tracing::debug!("Setting persistence actor reference");
+                state.persistence_ref = Some(persistence_ref);
+            }
+            
             ChatMessage::RegisterDisplay { context, display_ref } => {
                 tracing::debug!("Registering display actor for context: {:?}", context);
                 state.display_refs.insert(context, display_ref);
@@ -199,11 +240,13 @@ impl Actor for ChatActor {
 }
 
 impl ChatActor {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, session_id: String) -> Self {
         Self {
             config,
             client_ref: None,
             delegator_ref: None,
+            persistence_ref: None,
+            session_id,
         }
     }
     
@@ -214,6 +257,11 @@ impl ChatActor {
     
     pub fn with_delegator_ref(mut self, delegator_ref: ActorRef<DelegatorMessage>) -> Self {
         self.delegator_ref = Some(delegator_ref);
+        self
+    }
+    
+    pub fn with_persistence_ref(mut self, persistence_ref: ActorRef<ChatPersistenceMessage>) -> Self {
+        self.persistence_ref = Some(persistence_ref);
         self
     }
     
@@ -434,6 +482,10 @@ Always be transparent about using the memory tool - let users know when you're s
                             "type": "string",
                             "enum": ["list", "add", "update", "remove", "clear", "stats"],
                             "description": "The operation to perform"
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "Session ID for the todo list (defaults to 'default')"
                         },
                         "content": {
                             "type": "string",

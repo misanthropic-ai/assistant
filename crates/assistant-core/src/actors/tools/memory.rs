@@ -145,17 +145,98 @@ impl Actor for MemoryActor {
                     }
                 };
                 
-                // Execute operation
-                let result = match self.execute_operation(operation, state).await {
-                    Ok(result) => result,
-                    Err(e) => format!("Error: {}", e),
-                };
-                
-                // Send result back to chat actor
-                chat_ref.send_message(ChatMessage::ToolResult {
-                    id,
-                    result,
-                })?;
+                // Handle different operations differently
+                match operation {
+                    // Fire-and-forget operations - respond immediately
+                    MemoryOperation::Store { content, metadata } => {
+                        let key = Uuid::new_v4().to_string();
+                        
+                        // Send response immediately
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Stored memory with key: {}", key),
+                        })?;
+                        
+                        // Then do the actual work
+                        if let Err(e) = self.store_memory(&key, &content, metadata, state).await {
+                            tracing::error!("Failed to store memory {}: {}", key, e);
+                        }
+                    }
+                    
+                    MemoryOperation::StoreWithKey { key, content, metadata } => {
+                        // Send response immediately
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Stored memory with key: {}", key),
+                        })?;
+                        
+                        // Then do the actual work
+                        if let Err(e) = self.store_memory(&key, &content, metadata, state).await {
+                            tracing::error!("Failed to store memory {}: {}", key, e);
+                        }
+                    }
+                    
+                    MemoryOperation::Update { key, content, metadata, merge_metadata } => {
+                        // Send response immediately
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Updated memory: {}", key),
+                        })?;
+                        
+                        // Then do the actual work
+                        if let Err(e) = self.update_memory(&key, content.as_deref(), metadata, merge_metadata, state).await {
+                            tracing::error!("Failed to update memory {}: {}", key, e);
+                        }
+                    }
+                    
+                    MemoryOperation::Delete { key } => {
+                        // Send response immediately
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: format!("Deleted memory: {}", key),
+                        })?;
+                        
+                        // Then do the actual work
+                        if let Err(e) = self.delete_memory(&key, state).await {
+                            tracing::error!("Failed to delete memory {}: {}", key, e);
+                        }
+                    }
+                    
+                    MemoryOperation::Clear { session_only } => {
+                        // Send response immediately
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result: if session_only {
+                                "Cleared session memories".to_string()
+                            } else {
+                                "Cleared all memories".to_string()
+                            },
+                        })?;
+                        
+                        // Then do the actual work
+                        if let Err(e) = self.clear_memories(session_only, state).await {
+                            tracing::error!("Failed to clear memories: {}", e);
+                        }
+                    }
+                    
+                    // Operations that need to return data - handle synchronously
+                    MemoryOperation::Retrieve { .. } |
+                    MemoryOperation::Search { .. } |
+                    MemoryOperation::List { .. } |
+                    MemoryOperation::Stats => {
+                        // Execute operation synchronously since we need the result
+                        let result = match self.execute_operation(operation, state).await {
+                            Ok(result) => result,
+                            Err(e) => format!("Error: {}", e),
+                        };
+                        
+                        // Send result back to chat actor
+                        chat_ref.send_message(ChatMessage::ToolResult {
+                            id,
+                            result,
+                        })?;
+                    }
+                }
             }
             
             ToolMessage::Cancel { id } => {

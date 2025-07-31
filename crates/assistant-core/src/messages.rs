@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 use ractor::ActorRef;
 
@@ -41,6 +40,9 @@ pub enum ChatMessage {
     
     /// Set delegator actor reference
     SetDelegatorRef(ActorRef<DelegatorMessage>),
+    
+    /// Set persistence actor reference  
+    SetPersistenceRef(ActorRef<crate::actors::chat_persistence::ChatPersistenceMessage>),
     
     /// Register a display actor for a context
     RegisterDisplay { context: DisplayContext, display_ref: ActorRef<ChatMessage> },

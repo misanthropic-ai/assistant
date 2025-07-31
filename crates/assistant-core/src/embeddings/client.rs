@@ -35,6 +35,7 @@ impl OpenAIEmbeddingModel {
 }
 
 /// OpenAI embeddings client
+#[derive(Clone)]
 pub struct OpenAIEmbeddingClient {
     client: Client,
     api_key: String,

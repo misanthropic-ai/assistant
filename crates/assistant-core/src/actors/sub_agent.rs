@@ -1,7 +1,7 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use crate::config::Config;
 use crate::config::tool_config::ToolConfig;
-use crate::messages::{ChatMessage, DisplayContext, DelegatorMessage, ToolMessage, ToolCall};
+use crate::messages::{ChatMessage, DisplayContext, DelegatorMessage, ToolMessage};
 use crate::actors::client::{ClientActor, ClientMessage};
 use crate::actors::sub_agent_chat::SubAgentChatActor;
 use crate::actors::tools::web_search::WebSearchActor;

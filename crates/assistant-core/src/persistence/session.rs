@@ -31,8 +31,12 @@ impl Default for SessionMode {
 pub struct Session {
     pub id: String,
     pub workspace_path: Option<String>,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub summary_embedding: Option<Vec<f32>>,
     pub created_at: DateTime<Utc>,
     pub last_accessed: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -41,8 +45,12 @@ impl From<SessionRecord> for Session {
         Self {
             id: record.id,
             workspace_path: record.workspace_path,
+            name: record.name,
+            summary: record.summary,
+            summary_embedding: record.summary_embedding,
             created_at: record.created_at,
             last_accessed: record.last_accessed,
+            updated_at: record.updated_at,
             metadata: record.metadata,
         }
     }
@@ -99,12 +107,13 @@ impl SessionManager {
 
         sqlx::query(
             r#"
-            INSERT INTO sessions (id, workspace_path, created_at, last_accessed)
-            VALUES (?1, ?2, ?3, ?4)
+            INSERT INTO sessions (id, workspace_path, created_at, last_accessed, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
             "#,
         )
         .bind(&id)
         .bind(&workspace_str)
+        .bind(&now)
         .bind(&now)
         .bind(&now)
         .execute(self.db.pool())
@@ -113,8 +122,12 @@ impl SessionManager {
         Ok(Session {
             id,
             workspace_path: workspace_str,
+            name: None,
+            summary: None,
+            summary_embedding: None,
             created_at: now,
             last_accessed: now,
+            updated_at: now,
             metadata: None,
         })
     }
@@ -137,12 +150,13 @@ impl SessionManager {
 
             sqlx::query(
                 r#"
-                INSERT INTO sessions (id, workspace_path, created_at, last_accessed)
-                VALUES (?1, ?2, ?3, ?4)
+                INSERT INTO sessions (id, workspace_path, created_at, last_accessed, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5)
                 "#,
             )
             .bind(session_id)
             .bind(&workspace_str)
+            .bind(&now)
             .bind(&now)
             .bind(&now)
             .execute(self.db.pool())
@@ -151,8 +165,12 @@ impl SessionManager {
             Ok(Session {
                 id: session_id.to_string(),
                 workspace_path: workspace_str,
+                name: None,
+                summary: None,
+                summary_embedding: None,
                 created_at: now,
                 last_accessed: now,
+                updated_at: now,
                 metadata: None,
             })
         }
@@ -162,7 +180,8 @@ impl SessionManager {
     async fn get_session(&self, session_id: &str) -> Result<Option<Session>> {
         let row = sqlx::query(
             r#"
-            SELECT id, workspace_path, created_at, last_accessed, metadata
+            SELECT id, workspace_path, name, summary, summary_embedding, 
+                   created_at, last_accessed, updated_at, metadata
             FROM sessions
             WHERE id = ?1
             "#,
@@ -172,12 +191,31 @@ impl SessionManager {
         .await?;
 
         if let Some(row) = row {
+            // Deserialize embedding from bytes if present
+            let embedding_bytes: Option<Vec<u8>> = row.get(4);
+            let summary_embedding = embedding_bytes.and_then(|bytes| {
+                if bytes.len() % 4 == 0 {
+                    Some(
+                        bytes
+                            .chunks(4)
+                            .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                            .collect()
+                    )
+                } else {
+                    None
+                }
+            });
+
             Ok(Some(Session {
                 id: row.get(0),
                 workspace_path: row.get(1),
-                created_at: row.get(2),
-                last_accessed: row.get(3),
-                metadata: row.get::<Option<String>, _>(4)
+                name: row.get(2),
+                summary: row.get(3),
+                summary_embedding,
+                created_at: row.get(5),
+                last_accessed: row.get(6),
+                updated_at: row.get(7),
+                metadata: row.get::<Option<String>, _>(8)
                     .and_then(|s| serde_json::from_str(&s).ok()),
             }))
         } else {
@@ -217,7 +255,8 @@ impl SessionManager {
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, workspace_path, created_at, last_accessed, metadata
+            SELECT id, workspace_path, name, summary, summary_embedding,
+                   created_at, last_accessed, updated_at, metadata
             FROM sessions
             ORDER BY last_accessed DESC
             "#,
@@ -227,13 +266,34 @@ impl SessionManager {
 
         Ok(rows
             .into_iter()
-            .map(|row| Session {
-                id: row.get(0),
-                workspace_path: row.get(1),
-                created_at: row.get(2),
-                last_accessed: row.get(3),
-                metadata: row.get::<Option<String>, _>(4)
-                    .and_then(|s| serde_json::from_str(&s).ok()),
+            .map(|row| {
+                // Deserialize embedding from bytes if present
+                let embedding_bytes: Option<Vec<u8>> = row.get(4);
+                let summary_embedding = embedding_bytes.and_then(|bytes| {
+                    if bytes.len() % 4 == 0 {
+                        Some(
+                            bytes
+                                .chunks(4)
+                                .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                                .collect()
+                        )
+                    } else {
+                        None
+                    }
+                });
+
+                Session {
+                    id: row.get(0),
+                    workspace_path: row.get(1),
+                    name: row.get(2),
+                    summary: row.get(3),
+                    summary_embedding,
+                    created_at: row.get(5),
+                    last_accessed: row.get(6),
+                    updated_at: row.get(7),
+                    metadata: row.get::<Option<String>, _>(8)
+                        .and_then(|s| serde_json::from_str(&s).ok()),
+                }
             })
             .collect())
     }

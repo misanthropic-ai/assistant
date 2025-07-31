@@ -1,6 +1,4 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
-use serde_json::Value;
-use uuid::Uuid;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
 

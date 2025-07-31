@@ -5,6 +5,7 @@ use assistant_core::{
         chat::ChatActor,
         client::{ClientActor, ClientMessage},
         delegator::DelegatorActor,
+        chat_persistence::{ChatPersistenceActor, ChatPersistenceMessage},
         tools::{
             ls::LsActor,
             read::ReadActor,
@@ -25,6 +26,7 @@ use assistant_core::{
     ractor::{Actor, ActorRef},
 };
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// All the actor references needed for the system
 pub struct ActorSystem {
@@ -67,10 +69,22 @@ pub async fn init_actor_system(config: Config) -> Result<ActorSystem> {
     )
     .await?;
     
+    // Create persistence actor
+    let persistence_actor = ChatPersistenceActor::new(config.as_ref().clone()).await
+        .map_err(|e| anyhow::anyhow!("Failed to create persistence actor: {}", e))?
+        .with_client_ref(client_ref.clone());
+    let (persistence_ref, _) = Actor::spawn(
+        Some("persistence".to_string()),
+        persistence_actor,
+        ()
+    ).await?;
+    
     // Create chat with references
-    let chat = ChatActor::new(config.as_ref().clone())
+    let session_id = Uuid::new_v4().to_string();
+    let chat = ChatActor::new(config.as_ref().clone(), session_id)
         .with_client_ref(client_ref.clone())
-        .with_delegator_ref(delegator_ref.clone());
+        .with_delegator_ref(delegator_ref.clone())
+        .with_persistence_ref(persistence_ref.clone());
     let (chat_ref, _) = Actor::spawn(
         Some("chat".to_string()),
         chat,
@@ -246,9 +260,10 @@ async fn register_tools(delegator_ref: &ActorRef<DelegatorMessage>, config: &Con
     
     // Register todo tool
     if is_enabled("todo") {
+        let todo_actor = TodoActor::new(config.clone()).await?;
         let (todo_ref, _): (ActorRef<ToolMessage>, _) = Actor::spawn(
             Some("tool_todo".to_string()),
-            TodoActor::new(config.clone()),
+            todo_actor,
             config.clone(),
         )
         .await?;

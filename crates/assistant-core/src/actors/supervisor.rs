@@ -7,6 +7,7 @@ use crate::actors::{
     chat::ChatActor,
     client::{ClientActor, ClientMessage},
     delegator::DelegatorActor,
+    chat_persistence::{ChatPersistenceActor, ChatPersistenceMessage},
 };
 use crate::messages::DelegatorMessage;
 use crate::actors::tools::{ToolRegistry, ToolMessage};
@@ -21,6 +22,7 @@ pub struct SessionActors {
     chat: ActorRef<ChatMessage>,
     client: ActorRef<ClientMessage>,
     delegator: ActorRef<DelegatorMessage>,
+    persistence: ActorRef<ChatPersistenceMessage>,
 }
 
 /// Supervisor state
@@ -75,9 +77,20 @@ impl Actor for SupervisorActor {
                     self.config.clone()
                 ).await?;
                 
-                // Create chat actor
-                let chat_actor = ChatActor::new(self.config.clone())
+                // Create persistence actor
+                let persistence_actor = ChatPersistenceActor::new(self.config.clone()).await
+                    .map_err(|e| format!("Failed to create persistence actor: {}", e))?
                     .with_client_ref(client_ref.clone());
+                let (persistence_ref, _) = Actor::spawn(
+                    Some(format!("persistence-{}", session_id)),
+                    persistence_actor,
+                    ()
+                ).await?;
+                
+                // Create chat actor with session ID
+                let chat_actor = ChatActor::new(self.config.clone(), session_id.to_string())
+                    .with_client_ref(client_ref.clone())
+                    .with_persistence_ref(persistence_ref.clone());
                 let (chat_ref, _) = Actor::spawn(
                     Some(format!("chat-{}", session_id)),
                     chat_actor,
@@ -111,6 +124,7 @@ impl Actor for SupervisorActor {
                     chat: chat_ref,
                     client: client_ref,
                     delegator: delegator_ref,
+                    persistence: persistence_ref,
                 });
             }
             
@@ -125,6 +139,7 @@ impl Actor for SupervisorActor {
                     let _ = session.chat.stop(None);
                     let _ = session.client.stop(None);
                     let _ = session.delegator.stop(None);
+                    let _ = session.persistence.stop(None);
                 }
             }
             
