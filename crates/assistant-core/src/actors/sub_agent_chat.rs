@@ -57,6 +57,7 @@ impl Actor for SubAgentChatActor {
             ChatMessage::StreamToken { .. } |
             ChatMessage::ToolRequest { .. } |
             ChatMessage::ToolResult { .. } |
+            ChatMessage::AssistantResponse { .. } |
             ChatMessage::Complete { .. } |
             ChatMessage::Error { .. } => {
                 if let Some(context) = &state.current_context {
@@ -102,24 +103,9 @@ impl Actor for SubAgentChatActor {
             }
             
             ChatMessage::ToolRequest { id, call } => {
-                tracing::info!("SubAgentChat tool request: {}", call.tool_name);
+                // This is now handled in AssistantResponse
+                tracing::warn!("SubAgentChat received legacy ToolRequest message - this should be handled via AssistantResponse");
                 state.history.push_back(ChatMessage::ToolRequest { id, call: call.clone() });
-                
-                // Route tool call directly to the tool actor
-                if let Some(tool_ref) = self.tool_actors.get(&call.tool_name) {
-                    state.pending_tool_calls.insert(id, (call.tool_name.clone(), myself.clone()));
-                    tool_ref.send_message(ToolMessage::Execute {
-                        id,
-                        params: call.parameters,
-                        chat_ref: myself.clone(),
-                    })?;
-                } else {
-                    tracing::error!("Tool actor not found: {}", call.tool_name);
-                    myself.send_message(ChatMessage::ToolResult {
-                        id,
-                        result: format!("Error: Tool '{}' not available", call.tool_name),
-                    })?;
-                }
             }
             
             ChatMessage::ToolResult { id, result } => {
@@ -150,19 +136,69 @@ impl Actor for SubAgentChatActor {
                 }
             }
             
+            ChatMessage::AssistantResponse { id, content, tool_calls } => {
+                tracing::info!("SubAgentChat assistant response for request {}: content={:?}, tool_calls={}", 
+                    id, content, tool_calls.len());
+                
+                // Store in history
+                state.history.push_back(ChatMessage::AssistantResponse { 
+                    id, 
+                    content: content.clone(), 
+                    tool_calls: tool_calls.clone() 
+                });
+                
+                // Add assistant message with tool calls
+                if content.is_some() || !tool_calls.is_empty() {
+                    let openai_tool_calls = if tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(tool_calls.iter().enumerate().map(|(_idx, call)| {
+                            crate::openai_compat::ToolCall {
+                                id: format!("call_{}", Uuid::new_v4()),
+                                tool_type: "function".to_string(),
+                                function: crate::openai_compat::FunctionCall {
+                                    name: call.tool_name.clone(),
+                                    arguments: call.parameters.to_string(),
+                                },
+                            }
+                        }).collect())
+                    };
+                    
+                    let assistant_msg = OpenAIMessage::Assistant {
+                        content: content.clone(),
+                        name: None,
+                        tool_calls: openai_tool_calls,
+                    };
+                    state.messages.push(assistant_msg);
+                }
+                
+                // Process any tool calls
+                for call in tool_calls {
+                    let tool_id = Uuid::new_v4();
+                    
+                    // Route tool call directly to the tool actor
+                    if let Some(tool_ref) = self.tool_actors.get(&call.tool_name) {
+                        state.pending_tool_calls.insert(tool_id, (call.tool_name.clone(), myself.clone()));
+                        tool_ref.send_message(ToolMessage::Execute {
+                            id: tool_id,
+                            params: call.parameters,
+                            chat_ref: myself.clone(),
+                        })?;
+                    } else {
+                        tracing::error!("Tool actor not found: {}", call.tool_name);
+                        myself.send_message(ChatMessage::ToolResult {
+                            id: tool_id,
+                            result: format!("Error: Tool '{}' not available", call.tool_name),
+                        })?;
+                    }
+                }
+            }
+            
             ChatMessage::Complete { id, response } => {
                 tracing::info!("SubAgentChat response complete");
                 state.history.push_back(ChatMessage::Complete { id, response: response.clone() });
                 
-                // Only add assistant message if there's actual content
-                if !response.is_empty() {
-                    let assistant_msg = OpenAIMessage::Assistant {
-                        content: Some(response),
-                        name: None,
-                        tool_calls: None,
-                    };
-                    state.messages.push(assistant_msg);
-                }
+                // No longer add assistant message here - handled in AssistantResponse
                 
                 // Clear current request
                 state.current_request = None;

@@ -4,8 +4,7 @@ use std::fs;
 use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
-use crate::utils::path::{resolve_path, validate_path_access};
-use uuid::Uuid;
+use crate::utils::path::validate_path_access;
 
 /// Actor for writing files
 pub struct WriteActor {

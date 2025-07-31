@@ -232,38 +232,35 @@ impl ClientActor {
             }
         }
         
-        // Send any pending tool calls
-        let mut has_tool_calls = false;
+        // Build tool calls from pending_tool_calls
+        let mut tool_calls = Vec::new();
         for (_index, (id, name, args)) in pending_tool_calls {
             if !name.is_empty() && !id.is_empty() {
                 if let Ok(parameters) = serde_json::from_str(&args) {
-                    if let Some(ref chat_ref) = chat_ref {
-                        has_tool_calls = true;
-                        let _ = chat_ref.send_message(ChatMessage::ToolRequest {
-                            id: request_id,
-                            call: ToolCall {
-                                tool_name: name,
-                                parameters,
-                                delegate: false, // Will be determined by tool config
-                            },
-                        });
-                    }
+                    tool_calls.push(ToolCall {
+                        tool_name: name,
+                        parameters,
+                        delegate: false, // Will be determined by tool config
+                    });
                 }
             }
         }
         
-        // Only send completion if there are no tool calls
-        // If there are tool calls, completion will be sent after the next response
-        if !has_tool_calls {
+        // Send the assistant response with content and/or tool calls
+        if !full_response.is_empty() || !tool_calls.is_empty() {
             if let Some(ref chat_ref) = chat_ref {
-                tracing::info!("Sending Complete message for request {} with response: {}", request_id, full_response);
-                let _ = chat_ref.send_message(ChatMessage::Complete {
+                tracing::info!("Sending AssistantResponse for request {} with content: {} and {} tool calls", 
+                    request_id, 
+                    if full_response.is_empty() { "<empty>" } else { &full_response },
+                    tool_calls.len()
+                );
+                
+                let _ = chat_ref.send_message(ChatMessage::AssistantResponse {
                     id: request_id,
-                    response: full_response,
+                    content: if full_response.is_empty() { None } else { Some(full_response) },
+                    tool_calls,
                 });
             }
-        } else {
-            tracing::info!("Not sending Complete message for request {} - has tool calls", request_id);
         }
     }
 }

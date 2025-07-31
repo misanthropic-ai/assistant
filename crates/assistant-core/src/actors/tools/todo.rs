@@ -8,7 +8,6 @@ use sqlx::Row;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::persistence::database::Database;
-use crate::persistence::schema::TodoRecord;
 
 pub struct TodoActor {
     config: Config,
@@ -98,7 +97,7 @@ impl Actor for TodoActor {
         &self,
         _myself: ActorRef<Self::Msg>,
         msg: Self::Msg,
-        state: &mut Self::State,
+        _state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
             ToolMessage::Execute { id, params, chat_ref } => {

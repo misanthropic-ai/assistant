@@ -29,7 +29,7 @@ impl Actor for DelegatorActor {
     
     async fn pre_start(
         &self,
-        myself: ActorRef<Self::Msg>,
+        _myself: ActorRef<Self::Msg>,
         config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
         tracing::info!("Delegator actor starting");

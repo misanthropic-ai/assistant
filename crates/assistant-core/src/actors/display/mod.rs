@@ -1,4 +1,4 @@
-use ractor::{Actor, ActorRef};
+use ractor::Actor;
 use crate::messages::ChatMessage;
 
 pub mod cli;

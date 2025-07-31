@@ -5,7 +5,6 @@ use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
 use crate::utils::path::{resolve_path, validate_path_access};
-use uuid::Uuid;
 
 /// Actor for editing files by replacing text
 pub struct EditActor {

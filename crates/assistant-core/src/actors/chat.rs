@@ -28,6 +28,8 @@ pub struct ChatState {
     persistence_ref: Option<ActorRef<ChatPersistenceMessage>>,
     display_refs: std::collections::HashMap<DisplayContext, ActorRef<ChatMessage>>,
     session_id: String,
+    // Track active tool calls by ID
+    active_tool_calls: std::collections::HashMap<Uuid, String>,
 }
 
 impl Actor for ChatActor {
@@ -59,6 +61,7 @@ impl Actor for ChatActor {
             persistence_ref: self.persistence_ref.clone(),
             display_refs: std::collections::HashMap::new(),
             session_id: self.session_id.clone(),
+            active_tool_calls: std::collections::HashMap::new(),
         })
     }
     
@@ -73,6 +76,7 @@ impl Actor for ChatActor {
             ChatMessage::StreamToken { .. } |
             ChatMessage::ToolRequest { .. } |
             ChatMessage::ToolResult { .. } |
+            ChatMessage::AssistantResponse { .. } |
             ChatMessage::Complete { .. } |
             ChatMessage::Error { .. } => {
                 if let Some(context) = &state.current_context {
@@ -128,36 +132,29 @@ impl Actor for ChatActor {
             }
             
             ChatMessage::ToolRequest { id, call } => {
-                tracing::info!("Tool request: {}", call.tool_name);
+                // This is now handled in AssistantResponse
+                tracing::warn!("Received legacy ToolRequest message - this should be handled via AssistantResponse");
                 state.history.push_back(ChatMessage::ToolRequest { id, call: call.clone() });
-                
-                // Persist tool request
-                if let Some(ref persistence_ref) = state.persistence_ref {
-                    persistence_ref.send_message(ChatPersistenceMessage::PersistToolInteraction {
-                        id,
-                        session_id: state.session_id.clone(),
-                        tool_name: call.tool_name.clone(),
-                        parameters: Some(call.parameters.clone()),
-                        result: None,
-                    })?;
-                }
-                
-                // Route to delegator
-                if let Some(ref delegator_ref) = state.delegator_ref {
-                    delegator_ref.send_message(DelegatorMessage::RouteToolCall {
-                        id,
-                        call,
-                        chat_ref: myself.clone(),
-                    })?;
-                } else {
-                    tracing::error!("Delegator actor not set for tool request: {}", call.tool_name);
-                    return Err("Delegator actor not set".into());
-                }
             }
             
             ChatMessage::ToolResult { id, result } => {
                 tracing::info!("Tool result received for request {}: {}", id, result);
                 state.history.push_back(ChatMessage::ToolResult { id, result: result.clone() });
+                
+                // Get the tool name from our tracking map
+                let tool_name = state.active_tool_calls.remove(&id)
+                    .unwrap_or_else(|| "unknown_tool".to_string());
+                
+                // Persist tool result as a user message (following API convention)
+                if let Some(ref persistence_ref) = state.persistence_ref {
+                    // Format the tool result as a user message
+                    let tool_result_content = format!("Tool result from {}: {}", tool_name, result);
+                    persistence_ref.send_message(ChatPersistenceMessage::PersistUserPrompt {
+                        id,
+                        session_id: state.session_id.clone(),
+                        prompt: tool_result_content,
+                    })?;
+                }
                 
                 // Add tool result to messages
                 let tool_msg = OpenAIMessage::Tool {
@@ -180,28 +177,74 @@ impl Actor for ChatActor {
                 }
             }
             
-            ChatMessage::Complete { id, response } => {
-                tracing::info!("Response complete");
-                state.history.push_back(ChatMessage::Complete { id, response: response.clone() });
+            ChatMessage::AssistantResponse { id, content, tool_calls } => {
+                tracing::info!("Assistant response for request {}: content={:?}, tool_calls={}", 
+                    id, content, tool_calls.len());
                 
-                // Only add assistant message if there's actual content
-                if !response.is_empty() {
-                    // Persist assistant response
+                // Store in history
+                state.history.push_back(ChatMessage::AssistantResponse { 
+                    id, 
+                    content: content.clone(), 
+                    tool_calls: tool_calls.clone() 
+                });
+                
+                // Persist assistant response immediately
+                if content.is_some() || !tool_calls.is_empty() {
                     if let Some(ref persistence_ref) = state.persistence_ref {
                         persistence_ref.send_message(ChatPersistenceMessage::PersistAssistantResponse {
                             id,
                             session_id: state.session_id.clone(),
-                            response: response.clone(),
+                            response: content.clone().unwrap_or_default(),
                         })?;
                     }
                     
+                    // Build the OpenAI assistant message with tool calls
+                    let openai_tool_calls = if tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(tool_calls.iter().enumerate().map(|(_idx, call)| {
+                            crate::openai_compat::ToolCall {
+                                id: format!("call_{}", Uuid::new_v4()),
+                                tool_type: "function".to_string(),
+                                function: crate::openai_compat::FunctionCall {
+                                    name: call.tool_name.clone(),
+                                    arguments: call.parameters.to_string(),
+                                },
+                            }
+                        }).collect())
+                    };
+                    
                     let assistant_msg = OpenAIMessage::Assistant {
-                        content: Some(response),
+                        content: content.clone(),
                         name: None,
-                        tool_calls: None,
+                        tool_calls: openai_tool_calls,
                     };
                     state.messages.push(assistant_msg);
                 }
+                
+                // Now process any tool calls
+                for call in tool_calls {
+                    let tool_id = Uuid::new_v4();
+                    
+                    // Track the tool call
+                    state.active_tool_calls.insert(tool_id, call.tool_name.clone());
+                    
+                    // Send tool request to delegator
+                    if let Some(ref delegator_ref) = state.delegator_ref {
+                        delegator_ref.send_message(DelegatorMessage::RouteToolCall {
+                            id: tool_id,
+                            call,
+                            chat_ref: myself.clone(),
+                        })?;
+                    }
+                }
+            }
+            
+            ChatMessage::Complete { id, response } => {
+                tracing::info!("Response complete");
+                state.history.push_back(ChatMessage::Complete { id, response: response.clone() });
+                
+                // No longer persist here - persistence happens in AssistantResponse
                 
                 // Clear current request
                 state.current_request = None;

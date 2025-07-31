@@ -21,7 +21,7 @@ pub fn resolve_path(path: &str) -> Result<PathBuf> {
 
 /// Check if a path is within the allowed workspace
 /// For now, this is a placeholder - we'll implement proper sandboxing later
-pub fn validate_path_access(path: &Path) -> Result<()> {
+pub fn validate_path_access(_path: &Path) -> Result<()> {
     // TODO: Implement workspace/sandbox validation
     // For now, allow all paths
     Ok(())

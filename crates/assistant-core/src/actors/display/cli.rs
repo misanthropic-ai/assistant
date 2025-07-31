@@ -70,6 +70,34 @@ impl Actor for CLIDisplayActor {
                 println!(); // Blank line before assistant continues
             }
             
+            ChatMessage::AssistantResponse { id: _, content, tool_calls } => {
+                // Handle any remaining content
+                if let Some(text) = content {
+                    if !text.is_empty() && !state.has_output {
+                        print!("{}", text);
+                        use std::io::Write;
+                        let _ = std::io::stdout().flush();
+                    }
+                }
+                
+                if state.has_output {
+                    println!(); // Newline after content
+                    state.has_output = false;
+                }
+                
+                // Display tool calls
+                for call in &tool_calls {
+                    println!("\n🔧 Calling tool: {}", call.tool_name);
+                    println!("   Parameters: {}", serde_json::to_string_pretty(&call.parameters).unwrap_or_default());
+                    state.current_tool = Some(call.tool_name.clone());
+                }
+                
+                // If no tool calls, signal completion
+                if tool_calls.is_empty() {
+                    let _ = self.completion_tx.send(());
+                }
+            }
+            
             ChatMessage::Complete { id: _, response: _ } => {
                 if state.has_output {
                     println!(); // Final newline

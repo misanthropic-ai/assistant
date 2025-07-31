@@ -1,11 +1,9 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
 use crate::utils::path::{resolve_path, validate_path_access};
-use uuid::Uuid;
 use chrono::{DateTime, Local};
 
 /// Actor for listing directory contents

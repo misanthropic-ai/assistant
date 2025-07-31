@@ -32,6 +32,13 @@ pub enum ChatMessage {
     /// Tool execution result
     ToolResult { id: Uuid, result: String },
     
+    /// Assistant response (may include tool calls)
+    AssistantResponse { 
+        id: Uuid, 
+        content: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    },
+    
     /// Completion of response
     Complete { id: Uuid, response: String },
     

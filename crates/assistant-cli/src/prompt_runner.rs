@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use assistant_core::{
     actors::{
         display::cli::CLIDisplayActor,
+        chat_persistence::ChatPersistenceMessage,
     },
     config::Config,
     messages::{ChatMessage, DisplayContext},
@@ -91,6 +92,34 @@ pub async fn run_agent_prompt(input: String, max_iterations: usize, config_path:
                 if iterations >= max_iterations {
                     println!("\n⚠️  Max iterations ({}) reached. Stopping.", max_iterations);
                     break;
+                }
+            }
+        }
+    }
+    
+    // Wait for persistence operations to complete
+    if let Some(persistence_ref) = &actors.persistence {
+        tracing::info!("Waiting for persistence operations to complete...");
+        
+        // Create a channel to receive completion signal
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        
+        // Send wait message
+        if let Err(e) = persistence_ref.send_message(ChatPersistenceMessage::WaitForCompletion {
+            reply_to: tx,
+        }) {
+            tracing::warn!("Failed to send wait message to persistence actor: {}", e);
+        } else {
+            // Wait for completion (with timeout)
+            match tokio::time::timeout(tokio::time::Duration::from_secs(5), rx).await {
+                Ok(Ok(())) => {
+                    tracing::info!("All persistence operations completed");
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("Failed to receive completion signal: {}", e);
+                }
+                Err(_) => {
+                    tracing::warn!("Timeout waiting for persistence operations");
                 }
             }
         }

@@ -1,6 +1,6 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::fs;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};

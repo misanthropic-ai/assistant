@@ -34,6 +34,7 @@ pub struct ActorSystem {
     pub chat: ActorRef<ChatMessage>,
     pub client: ActorRef<ClientMessage>,
     pub delegator: ActorRef<DelegatorMessage>,
+    pub persistence: Option<ActorRef<ChatPersistenceMessage>>,
 }
 
 /// Initialize all actors and wire them together
@@ -106,6 +107,7 @@ pub async fn init_actor_system(config: Config) -> Result<ActorSystem> {
         chat: chat_ref,
         client: client_ref,
         delegator: delegator_ref,
+        persistence: Some(persistence_ref),
     })
 }
 
