@@ -74,7 +74,7 @@ pub async fn run_agent_prompt(input: String, max_iterations: usize, config_path:
     
     actors.chat.send_message(ChatMessage::UserPrompt {
         id: request_id,
-        prompt,
+        content: assistant_core::messages::UserMessageContent::Text(prompt),
         context: DisplayContext::CLI,
     })?;
     

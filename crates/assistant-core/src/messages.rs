@@ -17,11 +17,21 @@ pub enum DisplayContext {
     // Future: Tauri { window_id: String },
 }
 
+/// User message content that can be text or multi-modal
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum UserMessageContent {
+    Text(String),
+    MultiModal {
+        text: String,
+        images: Vec<String>, // base64 data URLs
+    },
+}
+
 /// Core message types for actor communication
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
     /// User input prompt
-    UserPrompt { id: Uuid, prompt: String, context: DisplayContext },
+    UserPrompt { id: Uuid, content: UserMessageContent, context: DisplayContext },
     
     /// Streaming token from LLM
     StreamToken { token: String },
@@ -98,7 +108,7 @@ pub enum UIMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DisplayContent {
-    UserMessage { content: String },
+    UserMessage { content: UserMessageContent },
     AssistantMessage { content: String },
     ToolExecution { tool: String, status: String },
     Error { message: String },

@@ -70,15 +70,37 @@ impl Actor for SubAgentChatActor {
         }
         
         match msg {
-            ChatMessage::UserPrompt { id, prompt, context } => {
-                tracing::info!("SubAgentChat received user prompt: {}", prompt);
+            ChatMessage::UserPrompt { id, content, context } => {
+                // Extract text for logging
+                let prompt_text = match &content {
+                    crate::messages::UserMessageContent::Text(text) => text.clone(),
+                    crate::messages::UserMessageContent::MultiModal { text, .. } => text.clone(),
+                };
+                
+                tracing::info!("SubAgentChat received user prompt: {}", prompt_text);
                 state.current_context = Some(context.clone());
-                state.history.push_back(ChatMessage::UserPrompt { id, prompt: prompt.clone(), context });
+                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context });
                 state.current_request = Some(id);
                 
                 // Add user message to conversation
                 let user_msg = OpenAIMessage::User {
-                    content: UserContent::Text(prompt),
+                    content: match content {
+                        crate::messages::UserMessageContent::Text(text) => UserContent::Text(text),
+                        crate::messages::UserMessageContent::MultiModal { text, images } => {
+                            let mut parts = vec![
+                                crate::openai_compat::ContentPart::Text { text },
+                            ];
+                            for image_url in images {
+                                parts.push(crate::openai_compat::ContentPart::Image {
+                                    image_url: crate::openai_compat::ImageUrl {
+                                        url: image_url,
+                                        detail: None,
+                                    },
+                                });
+                            }
+                            UserContent::Array(parts)
+                        }
+                    },
                     name: None,
                 };
                 state.messages.push(user_msg);

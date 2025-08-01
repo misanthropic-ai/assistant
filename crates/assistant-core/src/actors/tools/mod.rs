@@ -15,6 +15,9 @@ pub mod todo;
 pub mod memory;
 pub mod read_many_files;
 pub mod knowledge_agent;
+pub mod screenshot;
+pub mod desktop_control;
+pub mod computer_use;
 
 // Re-export message type and registry
 pub use crate::messages::ToolMessage;
@@ -34,3 +37,6 @@ pub use todo::TodoActor;
 pub use memory::MemoryActor;
 pub use read_many_files::ReadManyFilesActor;
 pub use knowledge_agent::KnowledgeAgentActor;
+pub use screenshot::ScreenshotActor;
+pub use desktop_control::DesktopControlActor;
+pub use computer_use::ComputerUseActor;

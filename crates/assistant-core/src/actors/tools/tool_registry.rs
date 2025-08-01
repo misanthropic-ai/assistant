@@ -99,6 +99,13 @@ impl ToolRegistry {
         // Knowledge agent (delegated)
         register_async_tool!("knowledge_agent", KnowledgeAgentActor);
         
+        // Desktop automation tools (macOS only for now)
+        register_tool!("screenshot", ScreenshotActor);
+        register_tool!("desktop_control", DesktopControlActor);
+        
+        // Computer use agent (delegated)
+        register_tool!("computer_use", ComputerUseActor);
+        
         tracing::info!("Initialized {} tools", tool_actors.len());
         Ok(tool_actors)
     }
@@ -107,7 +114,8 @@ impl ToolRegistry {
     pub fn available_tools() -> Vec<&'static str> {
         vec![
             "ls", "read", "write", "edit", "glob", "grep", "read_many_files",
-            "bash", "web_search", "web_fetch", "memory", "todo", "knowledge_agent"
+            "bash", "web_search", "web_fetch", "memory", "todo", "knowledge_agent",
+            "screenshot", "desktop_control", "computer_use"
         ]
     }
     
@@ -145,6 +153,9 @@ impl ToolRegistry {
         descriptions.insert("memory", ("Memory", "Store and retrieve information"));
         descriptions.insert("todo_write", ("Todo List", "Manage a todo list"));
         descriptions.insert("knowledge_agent", ("Knowledge Agent", "Search and synthesize knowledge from memories, chat history, todos, and sessions"));
+        descriptions.insert("screenshot", ("Screenshot", "Take screenshots on macOS"));
+        descriptions.insert("desktop_control", ("Desktop Control", "Control mouse and keyboard on macOS"));
+        descriptions.insert("computer_use", ("Computer Use", "Visual desktop automation agent"));
         
         descriptions
     }

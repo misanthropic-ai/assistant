@@ -194,6 +194,33 @@ pub async fn run_tool(tool_name: &str, params: Value, config_path: Option<&str>)
             ).await?;
             actor_ref
         }
+        "screenshot" => {
+            let actor = ScreenshotActor::new(config.clone());
+            let (actor_ref, _) = Actor::spawn(
+                Some(tool_name.to_string()),
+                actor,
+                config.clone(),
+            ).await?;
+            actor_ref
+        }
+        "desktop_control" => {
+            let actor = DesktopControlActor::new(config.clone());
+            let (actor_ref, _) = Actor::spawn(
+                Some(tool_name.to_string()),
+                actor,
+                config.clone(),
+            ).await?;
+            actor_ref
+        }
+        "computer_use" => {
+            let actor = ComputerUseActor::new(config.clone());
+            let (actor_ref, _) = Actor::spawn(
+                Some(tool_name.to_string()),
+                actor,
+                config.clone(),
+            ).await?;
+            actor_ref
+        }
         _ => {
             return Err(anyhow!("Unknown tool: {}", tool_name));
         }

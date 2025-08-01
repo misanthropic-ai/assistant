@@ -108,6 +108,27 @@ impl Actor for SubAgentActor {
             tool_actors.insert("memory".to_string(), memory_ref.clone());
         }
         
+        // Computer use agent gets screenshot and desktop_control tools in addition to web tools
+        if self.tool_name == "computer_use" {
+            // Create screenshot actor for computer use agent
+            let screenshot_actor = crate::actors::tools::screenshot::ScreenshotActor::new(sub_config.clone());
+            let (screenshot_ref, _) = Actor::spawn(
+                Some(format!("sub-screenshot-{}", self.tool_name)),
+                screenshot_actor,
+                sub_config.clone(),
+            ).await?;
+            tool_actors.insert("screenshot".to_string(), screenshot_ref.clone());
+            
+            // Create desktop control actor for computer use agent
+            let desktop_control_actor = crate::actors::tools::desktop_control::DesktopControlActor::new(sub_config.clone());
+            let (desktop_control_ref, _) = Actor::spawn(
+                Some(format!("sub-desktop-control-{}", self.tool_name)),
+                desktop_control_actor,
+                sub_config.clone(),
+            ).await?;
+            tool_actors.insert("desktop_control".to_string(), desktop_control_ref.clone());
+        }
+        
         // All sub-agents get web_search and web_fetch
         let web_search_actor = WebSearchActor::new(sub_config.clone());
         let (web_search_ref, _) = Actor::spawn(
@@ -185,7 +206,7 @@ impl Actor for SubAgentActor {
                 if let Some(ref chat_ref) = state.chat_ref {
                     chat_ref.send_message(ChatMessage::UserPrompt {
                         id,
-                        prompt: full_prompt,
+                        content: crate::messages::UserMessageContent::Text(full_prompt),
                         context: DisplayContext::SubAgent,
                     })?;
                 }

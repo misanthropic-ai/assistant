@@ -1,7 +1,7 @@
 use ractor::{Actor, ActorRef, ActorProcessingErr};
 use std::collections::VecDeque;
 use crate::config::Config;
-use crate::messages::{ChatMessage, DisplayContext};
+use crate::messages::{ChatMessage, DisplayContext, UserMessageContent};
 use crate::actors::client::ClientMessage;
 use crate::messages::DelegatorMessage;
 use crate::actors::chat_persistence::ChatPersistenceMessage;
@@ -89,24 +89,46 @@ impl Actor for ChatActor {
         }
         
         match msg {
-            ChatMessage::UserPrompt { id, prompt, context } => {
-                tracing::info!("Received user prompt: {}", prompt);
+            ChatMessage::UserPrompt { id, content, context } => {
+                // Extract text for logging and persistence
+                let prompt_text = match &content {
+                    UserMessageContent::Text(text) => text.clone(),
+                    UserMessageContent::MultiModal { text, .. } => text.clone(),
+                };
+                
+                tracing::info!("Received user prompt: {}", prompt_text);
                 state.current_context = Some(context.clone());
-                state.history.push_back(ChatMessage::UserPrompt { id, prompt: prompt.clone(), context });
+                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context });
                 state.current_request = Some(id);
                 
-                // Persist user prompt
+                // Persist user prompt (currently just text)
                 if let Some(ref persistence_ref) = state.persistence_ref {
                     persistence_ref.send_message(ChatPersistenceMessage::PersistUserPrompt {
                         id,
                         session_id: state.session_id.clone(),
-                        prompt: prompt.clone(),
+                        prompt: prompt_text,
                     })?;
                 }
                 
                 // Add user message to conversation
                 let user_msg = OpenAIMessage::User {
-                    content: UserContent::Text(prompt),
+                    content: match content {
+                        UserMessageContent::Text(text) => UserContent::Text(text),
+                        UserMessageContent::MultiModal { text, images } => {
+                            let mut parts = vec![
+                                crate::openai_compat::ContentPart::Text { text },
+                            ];
+                            for image_url in images {
+                                parts.push(crate::openai_compat::ContentPart::Image {
+                                    image_url: crate::openai_compat::ImageUrl {
+                                        url: image_url,
+                                        detail: None,
+                                    },
+                                });
+                            }
+                            UserContent::Array(parts)
+                        }
+                    },
                     name: None,
                 };
                 state.messages.push(user_msg);
@@ -353,7 +375,8 @@ Always be transparent about using the memory tool - let users know when you're s
         // Define tools based on config
         let tool_names = [
             "read", "edit", "write", "ls", "glob", "grep",
-            "bash", "web_search", "web_fetch", "todo", "memory", "knowledge_agent"
+            "bash", "web_search", "web_fetch", "todo", "memory", "knowledge_agent",
+            "screenshot", "desktop_control", "computer_use"
         ];
         
         for tool_name in &tool_names {
@@ -654,6 +677,151 @@ Always be transparent about using the memory tool - let users know when you're s
                         "include_examples": {
                             "type": "boolean",
                             "description": "Include examples in synthesis (for synthesize action)"
+                        }
+                    },
+                    "required": ["action"]
+                })
+            ),
+            "screenshot" => (
+                "Take a screenshot on macOS. Returns a base64 data URL of the screenshot image",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "enum": ["screen", "window", "region", "interactive"],
+                            "description": "Screenshot mode (default: screen)"
+                        },
+                        "window_id": {
+                            "type": "string",
+                            "description": "Window ID for window mode (use 'list_windows' first)"
+                        },
+                        "x": {
+                            "type": "integer",
+                            "description": "X coordinate for region mode"
+                        },
+                        "y": {
+                            "type": "integer",
+                            "description": "Y coordinate for region mode"
+                        },
+                        "width": {
+                            "type": "integer",
+                            "description": "Width for region mode"
+                        },
+                        "height": {
+                            "type": "integer",
+                            "description": "Height for region mode"
+                        },
+                        "delay": {
+                            "type": "integer",
+                            "description": "Delay in seconds before taking screenshot"
+                        },
+                        "list_windows": {
+                            "type": "boolean",
+                            "description": "List available windows instead of taking screenshot"
+                        }
+                    },
+                    "required": []
+                })
+            ),
+            "desktop_control" => (
+                "Control mouse and keyboard on macOS using cliclick",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["mouse_move", "mouse_click", "mouse_drag", "keyboard_type", "keyboard_key", "get_mouse_position", "check_installation"],
+                            "description": "The desktop control action to perform"
+                        },
+                        "x": {
+                            "type": "integer",
+                            "description": "X coordinate (for mouse actions)"
+                        },
+                        "y": {
+                            "type": "integer",
+                            "description": "Y coordinate (for mouse actions)"
+                        },
+                        "from_x": {
+                            "type": "integer",
+                            "description": "Starting X coordinate (for mouse_drag)"
+                        },
+                        "from_y": {
+                            "type": "integer",
+                            "description": "Starting Y coordinate (for mouse_drag)"
+                        },
+                        "to_x": {
+                            "type": "integer",
+                            "description": "Ending X coordinate (for mouse_drag)"
+                        },
+                        "to_y": {
+                            "type": "integer",
+                            "description": "Ending Y coordinate (for mouse_drag)"
+                        },
+                        "button": {
+                            "type": "string",
+                            "enum": ["left", "right", "middle"],
+                            "description": "Mouse button (default: left)"
+                        },
+                        "count": {
+                            "type": "integer",
+                            "description": "Click count for mouse_click (1=single, 2=double, 3=triple)"
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "description": "Duration in milliseconds for smooth mouse movement"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type (for keyboard_type)"
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Key or key combination to press (e.g., 'cmd+c', 'escape', 'return')"
+                        },
+                        "delay_ms": {
+                            "type": "integer",
+                            "description": "Delay between keystrokes in milliseconds"
+                        }
+                    },
+                    "required": ["action"]
+                })
+            ),
+            "computer_use" => (
+                "Visual desktop automation agent. This tool uses a dedicated sub-agent with vision capabilities to interact with the desktop through screenshots and control actions",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["describe_screen", "navigate_to", "perform_task", "type_text", "read_text", "wait_and_observe"],
+                            "description": "The computer use action to perform"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Natural language description of what to click/find (for navigate_to)"
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "Natural language description of the task to perform"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type in the current focused element"
+                        },
+                        "region": {
+                            "type": "object",
+                            "properties": {
+                                "x": {"type": "integer"},
+                                "y": {"type": "integer"},
+                                "width": {"type": "integer"},
+                                "height": {"type": "integer"}
+                            },
+                            "description": "Screen region for describe_screen or read_text actions"
+                        },
+                        "duration_ms": {
+                            "type": "integer",
+                            "description": "Duration to wait in milliseconds (for wait_and_observe)"
                         }
                     },
                     "required": ["action"]

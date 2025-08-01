@@ -116,6 +116,56 @@ impl Actor for DelegatorActor {
                             } else {
                                 serde_json::to_string(&call.parameters).unwrap_or_default()
                             }
+                        } else if call.tool_name == "computer_use" {
+                            // For computer_use, extract based on action type
+                            if let Some(action) = call.parameters.get("action").and_then(|v| v.as_str()) {
+                                match action {
+                                    "describe_screen" => {
+                                        if let Some(region) = call.parameters.get("region") {
+                                            format!("Take a screenshot of the specified region and describe what you see: {}", serde_json::to_string(region).unwrap_or_default())
+                                        } else {
+                                            "Take a screenshot of the entire screen and describe what you see".to_string()
+                                        }
+                                    }
+                                    "navigate_to" => {
+                                        let description = call.parameters.get("description")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown element");
+                                        format!("Take a screenshot, find and click on: {}", description)
+                                    }
+                                    "perform_task" => {
+                                        let task = call.parameters.get("task")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown task");
+                                        format!("Help me with this task: {}", task)
+                                    }
+                                    "type_text" => {
+                                        let text = call.parameters.get("text")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        format!("Type the following text: {}", text)
+                                    }
+                                    "read_text" => {
+                                        if let Some(region) = call.parameters.get("region") {
+                                            format!("Take a screenshot of the specified region and read any text you see: {}", serde_json::to_string(region).unwrap_or_default())
+                                        } else {
+                                            "Take a screenshot and read all visible text".to_string()
+                                        }
+                                    }
+                                    "wait_and_observe" => {
+                                        let duration = call.parameters.get("duration_ms")
+                                            .and_then(|v| v.as_u64())
+                                            .unwrap_or(1000);
+                                        let description = call.parameters.get("description")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("changes");
+                                        format!("Wait {} milliseconds and then check if: {}", duration, description)
+                                    }
+                                    _ => serde_json::to_string(&call.parameters).unwrap_or_default()
+                                }
+                            } else {
+                                serde_json::to_string(&call.parameters).unwrap_or_default()
+                            }
                         } else {
                             // For other tools, convert the entire parameters to a query
                             serde_json::to_string(&call.parameters).unwrap_or_default()
