@@ -353,7 +353,7 @@ Always be transparent about using the memory tool - let users know when you're s
         // Define tools based on config
         let tool_names = [
             "read", "edit", "write", "ls", "glob", "grep",
-            "bash", "web_search", "web_fetch", "todo", "memory"
+            "bash", "web_search", "web_fetch", "todo", "memory", "knowledge_agent"
         ];
         
         for tool_name in &tool_names {
@@ -602,6 +602,58 @@ Always be transparent about using the memory tool - let users know when you're s
                         "session_only": {
                             "type": "boolean",
                             "description": "Clear only session memories (for clear, default: false)"
+                        }
+                    },
+                    "required": ["action"]
+                })
+            ),
+            "knowledge_agent" => (
+                "Search and synthesize knowledge from memories, chat history, todos, and sessions. This tool uses a dedicated sub-agent that can search across all stored information and provide comprehensive analysis",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["search", "get_details", "analyze", "synthesize"],
+                            "description": "The action to perform"
+                        },
+                        "query": {
+                            "type": "string",
+                            "description": "Search query (for search action)"
+                        },
+                        "topic": {
+                            "type": "string",
+                            "description": "Topic to analyze or synthesize (for analyze/synthesize actions)"
+                        },
+                        "source": {
+                            "type": "string",
+                            "enum": ["memory", "chat_history", "todo", "session", "all"],
+                            "description": "Knowledge source (for get_details action)"
+                        },
+                        "id": {
+                            "type": "string",
+                            "description": "Item ID (for get_details action)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum results to return (for search, default: 20)"
+                        },
+                        "source_filter": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["memory", "chat_history", "todo", "session"]
+                            },
+                            "description": "Filter by specific sources (for search)"
+                        },
+                        "depth": {
+                            "type": "string",
+                            "enum": ["quick", "standard", "deep"],
+                            "description": "Analysis depth (for analyze action, default: standard)"
+                        },
+                        "include_examples": {
+                            "type": "boolean",
+                            "description": "Include examples in synthesis (for synthesize action)"
                         }
                     },
                     "required": ["action"]

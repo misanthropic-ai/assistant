@@ -185,6 +185,15 @@ pub async fn run_tool(tool_name: &str, params: Value, config_path: Option<&str>)
             ).await?;
             actor_ref
         }
+        "knowledge_agent" => {
+            let actor = knowledge_agent::KnowledgeAgentActor::new(config.clone()).await?;
+            let (actor_ref, _) = Actor::spawn(
+                Some(tool_name.to_string()),
+                actor,
+                config.clone(),
+            ).await?;
+            actor_ref
+        }
         _ => {
             return Err(anyhow!("Unknown tool: {}", tool_name));
         }

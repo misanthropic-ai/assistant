@@ -1,4 +1,5 @@
-use assistant_core::actors::tools::{WebSearchActor, ToolMessage};
+use assistant_core::actors::tools::web_search::WebSearchActor;
+use assistant_core::messages::ToolMessage;
 use assistant_core::messages::ChatMessage;
 use assistant_core::config::Config;
 use ractor::{Actor, ActorRef};
@@ -39,7 +40,8 @@ impl Actor for MockChatActor {
 }
 
 async fn setup_test() -> (Config, ActorRef<ChatMessage>, mpsc::UnboundedReceiver<ChatMessage>) {
-    let config = Config::default();
+    let mut config = Config::default();
+    config.api_key = "test-api-key".to_string();
     
     let (tx, rx) = mpsc::unbounded_channel();
     let mock_chat = MockChatActor { sender: tx.clone() };

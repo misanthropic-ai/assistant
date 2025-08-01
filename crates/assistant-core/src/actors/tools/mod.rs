@@ -14,6 +14,7 @@ pub mod web_fetch;
 pub mod todo;
 pub mod memory;
 pub mod read_many_files;
+pub mod knowledge_agent;
 
 // Re-export message type and registry
 pub use crate::messages::ToolMessage;
@@ -32,3 +33,4 @@ pub use web_fetch::WebFetchActor;
 pub use todo::TodoActor;
 pub use memory::MemoryActor;
 pub use read_many_files::ReadManyFilesActor;
+pub use knowledge_agent::KnowledgeAgentActor;

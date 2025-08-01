@@ -87,10 +87,28 @@ impl Actor for SubAgentActor {
             sub_config.clone(),
         ).await?;
         
-        // Create and register limited tool actors (web_search and web_fetch only)
+        // Create and register limited tool actors based on the sub-agent type
         let mut tool_actors = HashMap::new();
         
-        // Create web_search actor
+        // Knowledge agent gets memory tool in addition to web tools
+        if self.tool_name == "knowledge_agent" {
+            // Create memory actor for knowledge agent
+            let memory_actor = match crate::actors::tools::memory::MemoryActor::new(sub_config.clone()).await {
+                Ok(actor) => actor,
+                Err(e) => {
+                    tracing::error!("Failed to create memory actor for knowledge agent: {}", e);
+                    return Err(ActorProcessingErr::from(format!("Failed to create memory actor: {}", e)));
+                }
+            };
+            let (memory_ref, _) = Actor::spawn(
+                Some(format!("sub-memory-{}", self.tool_name)),
+                memory_actor,
+                sub_config.clone(),
+            ).await?;
+            tool_actors.insert("memory".to_string(), memory_ref.clone());
+        }
+        
+        // All sub-agents get web_search and web_fetch
         let web_search_actor = WebSearchActor::new(sub_config.clone());
         let (web_search_ref, _) = Actor::spawn(
             Some(format!("sub-web-search-{}", self.tool_name)),
@@ -99,7 +117,6 @@ impl Actor for SubAgentActor {
         ).await?;
         tool_actors.insert("web_search".to_string(), web_search_ref.clone());
         
-        // Create web_fetch actor
         let web_fetch_actor = WebFetchActor::new(sub_config.clone());
         let (web_fetch_ref, _) = Actor::spawn(
             Some(format!("sub-web-fetch-{}", self.tool_name)),

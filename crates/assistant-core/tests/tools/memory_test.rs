@@ -39,7 +39,8 @@ impl Actor for MockChatActor {
 }
 
 async fn setup_test() -> (Config, ActorRef<ChatMessage>, mpsc::UnboundedReceiver<ChatMessage>) {
-    let config = Config::default();
+    let mut config = Config::default();
+    config.api_key = "test-api-key".to_string();
     
     let (tx, rx) = mpsc::unbounded_channel();
     let mock_chat = MockChatActor { sender: tx.clone() };

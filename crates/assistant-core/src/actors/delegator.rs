@@ -99,6 +99,23 @@ impl Actor for DelegatorActor {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string()
+                        } else if call.tool_name == "knowledge_agent" {
+                            // For knowledge_agent, extract based on action type
+                            if let Some(action) = call.parameters.get("action").and_then(|v| v.as_str()) {
+                                match action {
+                                    "search" => call.parameters.get("query")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    "analyze" | "synthesize" => call.parameters.get("topic")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                    _ => serde_json::to_string(&call.parameters).unwrap_or_default()
+                                }
+                            } else {
+                                serde_json::to_string(&call.parameters).unwrap_or_default()
+                            }
                         } else {
                             // For other tools, convert the entire parameters to a query
                             serde_json::to_string(&call.parameters).unwrap_or_default()

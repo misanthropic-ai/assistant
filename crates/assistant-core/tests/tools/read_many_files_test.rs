@@ -1,4 +1,5 @@
-use assistant_core::actors::tools::{ReadManyFilesActor, ToolMessage};
+use assistant_core::actors::tools::read_many_files::ReadManyFilesActor;
+use assistant_core::messages::ToolMessage;
 use assistant_core::messages::ChatMessage;
 use assistant_core::config::Config;
 use ractor::{Actor, ActorRef};
@@ -8,7 +9,7 @@ use uuid::Uuid;
 use tempfile::TempDir;
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+// use std::path::Path;
 
 // Mock ChatActor for testing
 struct MockChatActor {
@@ -43,7 +44,8 @@ impl Actor for MockChatActor {
 }
 
 async fn setup_test() -> (Config, ActorRef<ChatMessage>, mpsc::UnboundedReceiver<ChatMessage>) {
-    let config = Config::default();
+    let mut config = Config::default();
+    config.api_key = "test-api-key".to_string();
     
     let (tx, rx) = mpsc::unbounded_channel();
     let mock_chat = MockChatActor { sender: tx.clone() };

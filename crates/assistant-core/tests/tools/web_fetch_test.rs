@@ -1,4 +1,5 @@
-use assistant_core::actors::tools::{WebFetchActor, ToolMessage};
+use assistant_core::actors::tools::web_fetch::WebFetchActor;
+use assistant_core::messages::ToolMessage;
 use assistant_core::messages::ChatMessage;
 use assistant_core::config::Config;
 use ractor::{Actor, ActorRef};
@@ -41,7 +42,8 @@ impl Actor for MockChatActor {
 }
 
 async fn setup_test() -> (Config, ActorRef<ChatMessage>, mpsc::UnboundedReceiver<ChatMessage>) {
-    let config = Config::default();
+    let mut config = Config::default();
+    config.api_key = "test-api-key".to_string();
     
     let (tx, rx) = mpsc::unbounded_channel();
     let mock_chat = MockChatActor { sender: tx.clone() };
@@ -240,8 +242,8 @@ async fn test_web_fetch_redirect_detection() {
     let (config, chat_ref, mut rx) = setup_test().await;
     
     // Start two mock servers
-    let mock_server1 = MockServer::start().await;
-    let mock_server2 = MockServer::start().await;
+    let _mock_server1 = MockServer::start().await;
+    let _mock_server2 = MockServer::start().await;
     
     // Note: We can't easily test cross-domain redirects with wiremock
     // So we'll test the redirect detection logic by mocking a response

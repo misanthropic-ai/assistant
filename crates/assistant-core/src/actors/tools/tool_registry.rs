@@ -96,6 +96,9 @@ impl ToolRegistry {
         // Todo tool (session-aware)
         register_async_tool!("todo", TodoActor);
         
+        // Knowledge agent (delegated)
+        register_async_tool!("knowledge_agent", KnowledgeAgentActor);
+        
         tracing::info!("Initialized {} tools", tool_actors.len());
         Ok(tool_actors)
     }
@@ -104,7 +107,7 @@ impl ToolRegistry {
     pub fn available_tools() -> Vec<&'static str> {
         vec![
             "ls", "read", "write", "edit", "glob", "grep", "read_many_files",
-            "bash", "web_search", "web_fetch", "memory", "todo"
+            "bash", "web_search", "web_fetch", "memory", "todo", "knowledge_agent"
         ]
     }
     
@@ -141,6 +144,7 @@ impl ToolRegistry {
         descriptions.insert("web_fetch", ("Web Fetch", "Fetch content from a URL"));
         descriptions.insert("memory", ("Memory", "Store and retrieve information"));
         descriptions.insert("todo_write", ("Todo List", "Manage a todo list"));
+        descriptions.insert("knowledge_agent", ("Knowledge Agent", "Search and synthesize knowledge from memories, chat history, todos, and sessions"));
         
         descriptions
     }
