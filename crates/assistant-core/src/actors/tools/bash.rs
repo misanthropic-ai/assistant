@@ -113,6 +113,54 @@ impl BashActor {
         Self { config }
     }
     
+    /// Check if a command is a TUI application
+    fn is_tui_command(&self, command: &str) -> Option<&'static str> {
+        // List of common TUI applications
+        const TUI_COMMANDS: &[&str] = &[
+            // Text editors
+            "vim", "vi", "nvim", "neovim", "emacs", "nano", "pico", "joe", "jed", "ne",
+            // File managers
+            "mc", "midnight-commander", "ranger", "nnn", "lf", "vifm",
+            // System monitors
+            "htop", "top", "btop", "gtop", "iotop", "iftop", "nethogs", "bmon",
+            // Development tools
+            "tig", "lazygit", "gitui", 
+            // Pagers (when used interactively)
+            "less", "more", "most",
+            // Email clients
+            "mutt", "neomutt", "alpine", "pine",
+            // IRC/Chat clients
+            "irssi", "weechat", 
+            // Web browsers
+            "lynx", "links", "w3m", "elinks",
+            // Games
+            "nethack", "angband", "rogue", "crawl", "bastet",
+            // Database clients
+            "mycli", "pgcli", "litecli",
+            // Music players
+            "cmus", "ncmpcpp", "mocp",
+            // Other utilities
+            "tmux", "screen", "byobu", "alsamixer", "cfdisk", "fdisk", "parted",
+        ];
+        
+        // Extract the base command (first word)
+        let base_command = command.trim().split_whitespace().next()?;
+        
+        // Check if it's a TUI command
+        for &tui_cmd in TUI_COMMANDS {
+            if base_command == tui_cmd || base_command.ends_with(&format!("/{}", tui_cmd)) {
+                return Some(tui_cmd);
+            }
+        }
+        
+        // Check for man command with arguments (man pages are TUI)
+        if base_command == "man" && command.trim().split_whitespace().count() > 1 {
+            return Some("man");
+        }
+        
+        None
+    }
+    
     async fn execute_command(
         &self,
         params: &BashParams,
@@ -120,6 +168,15 @@ impl BashActor {
         myself: ActorRef<ToolMessage>,
         execution_id: uuid::Uuid,
     ) -> String {
+        // Check if this is a TUI command
+        if let Some(tui_cmd) = self.is_tui_command(&params.command) {
+            return format!(
+                "Error: '{}' is a TUI (Terminal User Interface) application that takes over the terminal.\n\
+                Please use the 'tui_control' tool instead of 'bash' to interact with TUI applications.\n\
+                Example: Use tui_control to start a session with '{}'",
+                tui_cmd, params.command.trim()
+            );
+        }
         // Update working directory if cd command
         if let Some(new_dir) = self.extract_cd_path(&params.command) {
             match self.change_directory(&new_dir, &state.working_directory) {

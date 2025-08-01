@@ -33,6 +33,9 @@ enum Commands {
         #[arg(short, long, default_value = "10")]
         max_iterations: usize,
     },
+    
+    /// List all available tools
+    Tools,
 }
 
 mod tool_runner;
@@ -61,7 +64,55 @@ async fn main() -> Result<()> {
         Commands::Prompt { text, max_iterations } => {
             prompt_runner::run_agent_prompt(text, max_iterations, cli.config.as_deref()).await?;
         }
+        
+        Commands::Tools => {
+            use assistant_core::{config::Config, actors::tools::ToolRegistry};
+            
+            // Load configuration
+            let config = match cli.config.as_deref() {
+                Some(path) => Config::load(std::path::Path::new(path))?,
+                None => Config::load_default().unwrap_or_else(|_| {
+                    eprintln!("Warning: Could not load config.json, using defaults");
+                    Config::default()
+                }),
+            };
+            
+            let registry = ToolRegistry::new(config);
+            let all_tools = ToolRegistry::available_tools();
+            let enabled_tools = registry.enabled_tools();
+            let descriptions = ToolRegistry::tool_descriptions();
+            
+            println!("Available tools:\n");
+            
+            for tool in all_tools {
+                let enabled = enabled_tools.contains(&tool);
+                let status = if enabled { "✓ enabled " } else { "✗ disabled" };
+                let description = descriptions.get(tool)
+                    .map(|(_, desc)| *desc)
+                    .unwrap_or("No description available");
+                
+                println!("  {} [{}] - {}", 
+                    tool.to_string().pad_to_width(20),
+                    status,
+                    description
+                );
+            }
+            
+            println!("\nTo use a tool: assistant tool <name> <params>");
+            println!("To enable/disable tools, edit config.json");
+        }
     }
     
     Ok(())
+}
+
+// Helper trait for padding
+trait PadToWidth {
+    fn pad_to_width(&self, width: usize) -> String;
+}
+
+impl PadToWidth for String {
+    fn pad_to_width(&self, width: usize) -> String {
+        format!("{:<width$}", self, width = width)
+    }
 }

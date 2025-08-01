@@ -18,6 +18,8 @@ pub mod knowledge_agent;
 pub mod screenshot;
 pub mod desktop_control;
 pub mod computer_use;
+pub mod tui_control;
+pub mod tui_agent;
 
 // Re-export message type and registry
 pub use crate::messages::ToolMessage;
@@ -40,3 +42,5 @@ pub use knowledge_agent::KnowledgeAgentActor;
 pub use screenshot::ScreenshotActor;
 pub use desktop_control::DesktopControlActor;
 pub use computer_use::ComputerUseActor;
+pub use tui_control::TuiControlActor;
+pub use tui_agent::TuiAgentActor;

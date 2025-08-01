@@ -106,6 +106,12 @@ impl ToolRegistry {
         // Computer use agent (delegated)
         register_tool!("computer_use", ComputerUseActor);
         
+        // TUI control tool
+        register_tool!("tui_control", TuiControlActor);
+        
+        // TUI agent (delegated)
+        register_async_tool!("tui_agent", TuiAgentActor);
+        
         tracing::info!("Initialized {} tools", tool_actors.len());
         Ok(tool_actors)
     }
@@ -115,7 +121,7 @@ impl ToolRegistry {
         vec![
             "ls", "read", "write", "edit", "glob", "grep", "read_many_files",
             "bash", "web_search", "web_fetch", "memory", "todo", "knowledge_agent",
-            "screenshot", "desktop_control", "computer_use"
+            "screenshot", "desktop_control", "computer_use", "tui_control", "tui_agent"
         ]
     }
     
@@ -147,7 +153,7 @@ impl ToolRegistry {
         descriptions.insert("glob", ("Glob Search", "Search for files matching a pattern"));
         descriptions.insert("grep", ("Grep Search", "Search file contents using regex"));
         descriptions.insert("read_many_files", ("Read Many Files", "Read multiple files at once"));
-        descriptions.insert("bash", ("Shell Command", "Execute a shell command"));
+        descriptions.insert("bash", ("Shell Command", "Execute shell commands. Cannot run interactive TUI applications like vim, nano, or htop. Use tui_control for those."));
         descriptions.insert("web_search", ("Web Search", "Search the web for information"));
         descriptions.insert("web_fetch", ("Web Fetch", "Fetch content from a URL"));
         descriptions.insert("memory", ("Memory", "Store and retrieve information"));
@@ -156,6 +162,8 @@ impl ToolRegistry {
         descriptions.insert("screenshot", ("Screenshot", "Take screenshots on macOS"));
         descriptions.insert("desktop_control", ("Desktop Control", "Control mouse and keyboard on macOS"));
         descriptions.insert("computer_use", ("Computer Use", "Visual desktop automation agent"));
+        descriptions.insert("tui_control", ("TUI Control", "Control interactive terminal applications (vim, htop, etc.) through tmux. Use this instead of bash for TUI apps."));
+        descriptions.insert("tui_agent", ("TUI Agent", "High-level intelligent agent for complex TUI interactions. Delegates to tui_control for execution."));
         
         descriptions
     }
