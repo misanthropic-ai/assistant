@@ -90,6 +90,12 @@ impl Actor for ClientActor {
                     max_tokens: Some(self.config.max_tokens as u32),
                     stream: true,
                 };
+
+                if tracing::level_enabled!(tracing::Level::INFO) {
+                    if let Ok(req_json) = serde_json::to_string_pretty(&request) {
+                        tracing::info!("ChatCompletionRequest JSON:\n{}", req_json);
+                    }
+                }
                 
                 // Get stream
                 let stream_result = self.client.create_chat_completion_stream(request).await;
@@ -165,6 +171,9 @@ impl ClientActor {
                 chunk = stream.next() => {
                     match chunk {
                         Some(Ok(response)) => {
+                                if tracing::level_enabled!(tracing::Level::INFO) {
+                                    tracing::info!("Received SSE chunk: {:?}", response);
+                                }
                             for choice in response.choices {
                                 let delta = &choice.delta;
                                 // Handle content

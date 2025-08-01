@@ -291,9 +291,9 @@ pub async fn run_tool(tool_name: &str, params: Value, config_path: Option<&str>)
     // ----------------------------------------------------------------------
     // Wait for the result from either the delegator path or the local path.
     // ----------------------------------------------------------------------
-    match tokio::time::timeout(tokio::time::Duration::from_secs(60), rx.recv()).await {
+    match tokio::time::timeout(tokio::time::Duration::from_secs(120), rx.recv()).await {
         Ok(Some(result)) => Ok(result),
         Ok(None) => Err(anyhow!("Tool did not return a result")),
-        Err(_) => Err(anyhow!("Tool execution timed out after 60 seconds")),
+        Err(_) => Err(anyhow!("Tool execution timed out after 120 seconds")),
     }
 }

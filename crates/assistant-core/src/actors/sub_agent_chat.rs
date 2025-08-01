@@ -74,11 +74,17 @@ impl Actor for SubAgentChatActor {
         match msg {
             ChatMessage::UserPrompt { id, content, context } => {
                 // Extract text for logging
-                let prompt_text = match &content {
+                let mut prompt_text = match &content {
                     crate::messages::UserMessageContent::Text(text) => text.clone(),
                     crate::messages::UserMessageContent::MultiModal { text, .. } => text.clone(),
                 };
                 
+                // Prepend tool catalogue if function-calling API is disabled
+                if !self.enable_tool_api {
+                    let cat = self.build_tool_catalogue_xml();
+                    prompt_text = format!("{}\n\n{}", cat, prompt_text);
+                }
+
                 tracing::info!("SubAgentChat received user prompt: {}", prompt_text);
                 state.current_context = Some(context.clone());
                 state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context });
@@ -152,10 +158,18 @@ impl Actor for SubAgentChatActor {
                     // ----------------------------------------------------------
                     // XML shim path – wrap the JSON result in <tool_result>
                     // ----------------------------------------------------------
+                    
+                    // Special handling for screenshot tool results to avoid token limit issues
+                    let processed_result = if tool_name == "screenshot" {
+                        self.process_screenshot_result(&result)
+                    } else {
+                        result.clone()
+                    };
+                    
                     let wrapped = format!(
                         "<tool_result name=\"{}\">{}</tool_result>",
                         tool_name,
-                        result
+                        processed_result
                     );
                     state.messages.push(OpenAIMessage::Assistant {
                         content: Some(wrapped),
@@ -164,13 +178,39 @@ impl Actor for SubAgentChatActor {
                     });
                 }
                 
-                // Continue conversation
+                // Continue conversation - handle screenshot results specially
                 if let Some(ref client_ref) = self.client_ref {
                     tracing::info!("SubAgentChat continuing conversation after tool result for request {}", id);
+                    
+                    // For screenshot tool results, we need to add the image to the next message
+                    let mut messages = state.messages.clone();
+                    if let Some(tool_name) = &tool_name_opt {
+                        if tool_name == "screenshot" {
+                            if let Some(image_url) = self.extract_image_from_result(&result) {
+                                // Add a user message with the screenshot image for the vision model
+                                let user_msg = OpenAIMessage::User {
+                                    content: crate::openai_compat::UserContent::Array(vec![
+                                        crate::openai_compat::ContentPart::Text { 
+                                            text: "Here is the screenshot you requested. Please describe what you see.".to_string() 
+                                        },
+                                        crate::openai_compat::ContentPart::Image {
+                                            image_url: crate::openai_compat::ImageUrl {
+                                                url: image_url,
+                                                detail: None,
+                                            }
+                                        }
+                                    ]),
+                                    name: None,
+                                };
+                                messages.push(user_msg);
+                            }
+                        }
+                    }
+                    
                     let tools = self.build_tools();
                     client_ref.send_message(ClientMessage::Generate {
                         id,
-                        messages: state.messages.clone(),
+                        messages,
                         tools,
                     })?;
                 } else {
@@ -241,7 +281,27 @@ impl Actor for SubAgentChatActor {
                 // ------------------------------------------------------------------
                 if !self.enable_tool_api {
                     if let Some(txt) = &content {
-                        let xml_calls = Self::extract_xml_tool_calls(txt);
+                        let (xml_calls, failures) = Self::extract_xml_tool_calls(txt);
+                        tracing::info!("XML tool_call extraction found {} calls ({} parse failures)", xml_calls.len(), failures.len());
+                        if !failures.is_empty() {
+                            let err_msg = failures.join("; ");
+                            tracing::error!("Parse failures: {}", err_msg);
+                            // propagate error so caller is informed
+                            myself.send_message(ChatMessage::Error { id, error: err_msg.clone() })?;
+                        }
+                        if xml_calls.is_empty() {
+                            tracing::warn!("No <tool_call> blocks found in assistant response when tool API disabled");
+                            // If we have content but no tool calls, this is the final response
+                            if !txt.trim().is_empty() {
+                                tracing::info!("Treating response with content but no tool calls as final for request {}", id);
+                                // Use the current_request ID, not the AssistantResponse ID
+                                let completion_id = state.current_request.unwrap_or(id);
+                                myself.send_message(ChatMessage::Complete { 
+                                    id: completion_id, 
+                                    response: txt.clone() 
+                                })?;
+                            }
+                        }
                         for (tool_name, params) in xml_calls {
                             let tool_id = Uuid::new_v4();
                             if let Some(tool_ref) = self.tool_actors.get(&tool_name) {
@@ -317,6 +377,18 @@ impl SubAgentChatActor {
         self
     }
     
+    fn build_tool_catalogue_xml(&self) -> String {
+        let mut parts = Vec::new();
+        parts.push("<tools>".to_string());
+        for tool_name in self.tool_actors.keys() {
+            let def = self.create_tool_definition(tool_name);
+            let json_def = serde_json::to_string(&def).unwrap_or_default();
+            parts.push(format!("  <tool>{}</tool>", json_def));
+        }
+        parts.push("</tools>".to_string());
+        parts.join("\n")
+    }
+
     fn build_tools(&self) -> Vec<Tool> {
         // If this sub-agent is not allowed to use the function-calling API, return an empty list.
         if !self.enable_tool_api {
@@ -335,6 +407,103 @@ impl SubAgentChatActor {
     fn create_tool_definition(&self, tool_name: &str) -> Tool {
         // Create tool definitions for the tools available to sub-agents
         let (description, parameters) = match tool_name {
+            "screenshot" => (
+                "Take a screenshot of the screen or a region",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["capture_screen", "capture_window", "capture_region", "capture_interactive"],
+                            "description": "Type of screenshot to take"
+                        },
+                        "display": {
+                            "type": "integer",
+                            "description": "Display number (for capture_screen)"
+                        },
+                        "x": {
+                            "type": "integer",
+                            "description": "X coordinate for region capture"
+                        },
+                        "y": {
+                            "type": "integer", 
+                            "description": "Y coordinate for region capture"
+                        },
+                        "width": {
+                            "type": "integer",
+                            "description": "Width for region capture"
+                        },
+                        "height": {
+                            "type": "integer",
+                            "description": "Height for region capture"
+                        }
+                    },
+                    "required": ["action"]
+                })
+            ),
+            "desktop_control" => (
+                "Control mouse and keyboard on the desktop",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": ["mouse_move", "mouse_click", "mouse_drag", "keyboard_type", "keyboard_key", "get_mouse_position", "check_installation"],
+                            "description": "Type of desktop control action"
+                        },
+                        "x": {
+                            "type": "integer",
+                            "description": "X coordinate for mouse actions"
+                        },
+                        "y": {
+                            "type": "integer",
+                            "description": "Y coordinate for mouse actions"
+                        },
+                        "from_x": {
+                            "type": "integer",
+                            "description": "Starting X coordinate for drag"
+                        },
+                        "from_y": {
+                            "type": "integer",
+                            "description": "Starting Y coordinate for drag"
+                        },
+                        "to_x": {
+                            "type": "integer",
+                            "description": "Ending X coordinate for drag"
+                        },
+                        "to_y": {
+                            "type": "integer",
+                            "description": "Ending Y coordinate for drag"
+                        },
+                        "button": {
+                            "type": "string",
+                            "enum": ["left", "right", "middle"],
+                            "description": "Mouse button to use"
+                        },
+                        "count": {
+                            "type": "integer",
+                            "description": "Number of clicks"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text to type"
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Key or key combination to press"
+                        },
+                        "duration": {
+                            "type": "integer",
+                            "description": "Duration in milliseconds"
+                        },
+                        "delay_ms": {
+                            "type": "integer",
+                            "description": "Delay between keystrokes in milliseconds"
+                        }
+                    },
+                    "required": ["action"]
+                })
+            ),
             "web_search" => (
                 "Search the web for information",
                 serde_json::json!({
@@ -380,22 +549,57 @@ impl SubAgentChatActor {
         }
     }
 
-    /// Extract <tool_call name="...">JSON</tool_call> blocks from the model output.
-    /// Returns Vec<(tool_name, parameters_json)>.
-    fn extract_xml_tool_calls(text: &str) -> Vec<(String, serde_json::Value)> {
+    /// Extract <tool_call>JSON</tool_call> blocks from the model output.
+    /// The JSON should contain a "name" field with the tool name.
+    /// Returns (calls, parse_failures)
+    fn extract_xml_tool_calls(text: &str) -> (Vec<(String, serde_json::Value)>, Vec<String>) {
         let mut calls = Vec::new();
-        // Lazy static regex would be ideal but simple compile every time is fine here.
-        let re = regex::Regex::new(r#"(?s)<tool_call\s+name=\"([^\"]+)\">(.*?)</tool_call>"#).unwrap();
+        let mut failures = Vec::new();
+        // Updated regex to match <tool_call>JSON</tool_call> format
+        let re = regex::Regex::new(r#"(?s)<tool_call>(.*?)</tool_call>"#).unwrap();
         for cap in re.captures_iter(text) {
-            let name = cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-            let args_str = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
-            match serde_json::from_str::<serde_json::Value>(args_str) {
-                Ok(params) => calls.push((name, params)),
-                Err(e) => {
-                    tracing::warn!("Failed to parse tool_call JSON for {}: {}", name, e);
-                }
+            let json_str = cap.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+            match serde_json::from_str::<serde_json::Value>(json_str) {
+                Ok(json_obj) => {
+                    // Extract tool name from the "name" field in JSON
+                    if let Some(name) = json_obj.get("name").and_then(|v| v.as_str()) {
+                        calls.push((name.to_string(), json_obj));
+                    } else {
+                        failures.push(format!("Missing 'name' field in tool call JSON: {}", json_str));
+                    }
+                },
+                Err(e) => failures.push(format!("JSON parse error: {} for: {}", e, json_str)),
             }
         }
-        calls
+        (calls, failures)
+    }
+
+    /// Extract image data URL from a screenshot tool result
+    fn extract_image_from_result(&self, result: &str) -> Option<String> {
+        // Parse the JSON result from screenshot tool
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(result) {
+            if let Some(image) = json.get("image").and_then(|v| v.as_str()) {
+                return Some(image.to_string());
+            }
+        }
+        None
+    }
+
+    /// Process screenshot result to remove large base64 data and provide summary
+    fn process_screenshot_result(&self, result: &str) -> String {
+        // Parse the JSON result from screenshot tool
+        if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(result) {
+            // Remove the image data to avoid token limit issues
+            if let Some(obj) = json.as_object_mut() {
+                if obj.contains_key("image") {
+                    obj.remove("image");
+                    obj.insert("image".to_string(), serde_json::Value::String("<image_data_removed>".to_string()));
+                    obj.insert("note".to_string(), serde_json::Value::String("Screenshot captured successfully. Image data has been provided to the vision model separately.".to_string()));
+                }
+            }
+            serde_json::to_string(&json).unwrap_or_else(|_| result.to_string())
+        } else {
+            result.to_string()
+        }
     }
 }
