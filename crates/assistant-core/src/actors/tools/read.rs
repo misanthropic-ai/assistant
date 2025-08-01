@@ -7,6 +7,7 @@ use crate::utils::path::{resolve_path, validate_path_access};
 
 /// Actor for reading files
 pub struct ReadActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

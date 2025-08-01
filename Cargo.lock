@@ -176,6 +176,7 @@ dependencies = [
  "lru 0.16.0",
  "ndarray",
  "ractor",
+ "regex",
  "reqwest",
  "scraper",
  "serde",

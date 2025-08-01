@@ -30,10 +30,14 @@ use uuid::Uuid;
 
 /// All the actor references needed for the system
 pub struct ActorSystem {
+    #[allow(dead_code)]
     pub supervisor: ActorRef<assistant_core::messages::SupervisorMessage>,
     pub chat: ActorRef<ChatMessage>,
+    #[allow(dead_code)]
     pub client: ActorRef<ClientMessage>,
+    #[allow(dead_code)]
     pub delegator: ActorRef<DelegatorMessage>,
+    #[allow(dead_code)]
     pub persistence: Option<ActorRef<ChatPersistenceMessage>>,
 }
 

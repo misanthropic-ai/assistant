@@ -10,6 +10,7 @@ use chrono::Utc;
 use crate::persistence::database::Database;
 
 pub struct TodoActor {
+    #[allow(dead_code)]
     config: Config,
     database: Database,
 }

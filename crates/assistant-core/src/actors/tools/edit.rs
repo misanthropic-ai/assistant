@@ -8,6 +8,7 @@ use crate::utils::path::{resolve_path, validate_path_access};
 
 /// Actor for editing files by replacing text
 pub struct EditActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

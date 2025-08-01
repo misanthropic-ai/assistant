@@ -8,9 +8,11 @@ use uuid::Uuid;
 
 /// Simplified chat actor for sub-agents that calls tools directly
 pub struct SubAgentChatActor {
+    #[allow(dead_code)]
     config: Config,
     client_ref: Option<ActorRef<ClientMessage>>,
     tool_actors: HashMap<String, ActorRef<ToolMessage>>,
+    enable_tool_api: bool,
 }
 
 /// SubAgentChat actor state
@@ -134,15 +136,33 @@ impl Actor for SubAgentChatActor {
                 tracing::info!("SubAgentChat tool result received for request {}: {}", id, result);
                 state.history.push_back(ChatMessage::ToolResult { id, result: result.clone() });
                 
-                // Remove from pending
-                state.pending_tool_calls.remove(&id);
+                // Retrieve original tool name (if any) and remove from pending
+                let tool_name_opt = state.pending_tool_calls.remove(&id).map(|(n, _)| n);
                 
-                // Add tool result to messages
-                let tool_msg = OpenAIMessage::Tool {
-                    content: result,
-                    tool_call_id: id.to_string(),
-                };
-                state.messages.push(tool_msg);
+                if self.enable_tool_api {
+                    // ----------------------------------------------------------
+                    // Standard function-calling path – feed back via Tool message
+                    // ----------------------------------------------------------
+                    let tool_msg = OpenAIMessage::Tool {
+                        content: result.clone(),
+                        tool_call_id: id.to_string(),
+                    };
+                    state.messages.push(tool_msg);
+                } else if let Some(tool_name) = &tool_name_opt {
+                    // ----------------------------------------------------------
+                    // XML shim path – wrap the JSON result in <tool_result>
+                    // ----------------------------------------------------------
+                    let wrapped = format!(
+                        "<tool_result name=\"{}\">{}</tool_result>",
+                        tool_name,
+                        result
+                    );
+                    state.messages.push(OpenAIMessage::Assistant {
+                        content: Some(wrapped),
+                        name: None,
+                        tool_calls: None,
+                    });
+                }
                 
                 // Continue conversation
                 if let Some(ref client_ref) = self.client_ref {
@@ -194,11 +214,11 @@ impl Actor for SubAgentChatActor {
                     state.messages.push(assistant_msg);
                 }
                 
-                // Process any tool calls
+                // ------------------------------------------------------------------
+                // Process tool calls coming from the OpenAI function-calling API
+                // ------------------------------------------------------------------
                 for call in tool_calls {
                     let tool_id = Uuid::new_v4();
-                    
-                    // Route tool call directly to the tool actor
                     if let Some(tool_ref) = self.tool_actors.get(&call.tool_name) {
                         state.pending_tool_calls.insert(tool_id, (call.tool_name.clone(), myself.clone()));
                         tool_ref.send_message(ToolMessage::Execute {
@@ -212,6 +232,33 @@ impl Actor for SubAgentChatActor {
                             id: tool_id,
                             result: format!("Error: Tool '{}' not available", call.tool_name),
                         })?;
+                    }
+                }
+
+                // ------------------------------------------------------------------
+                // When the function-calling API is disabled we need to manually
+                // look for <tool_call> blocks inside the assistant content.
+                // ------------------------------------------------------------------
+                if !self.enable_tool_api {
+                    if let Some(txt) = &content {
+                        let xml_calls = Self::extract_xml_tool_calls(txt);
+                        for (tool_name, params) in xml_calls {
+                            let tool_id = Uuid::new_v4();
+                            if let Some(tool_ref) = self.tool_actors.get(&tool_name) {
+                                state.pending_tool_calls.insert(tool_id, (tool_name.clone(), myself.clone()));
+                                tool_ref.send_message(ToolMessage::Execute {
+                                    id: tool_id,
+                                    params,
+                                    chat_ref: myself.clone(),
+                                })?;
+                            } else {
+                                tracing::error!("Tool actor not found: {}", tool_name);
+                                myself.send_message(ChatMessage::ToolResult {
+                                    id: tool_id,
+                                    result: format!("Error: Tool '{}' not available", tool_name),
+                                })?;
+                            }
+                        }
                     }
                 }
             }
@@ -256,11 +303,12 @@ impl Actor for SubAgentChatActor {
 }
 
 impl SubAgentChatActor {
-    pub fn new(config: Config, tool_actors: HashMap<String, ActorRef<ToolMessage>>) -> Self {
+    pub fn new(config: Config, tool_actors: HashMap<String, ActorRef<ToolMessage>>, enable_tool_api: bool) -> Self {
         Self {
             config,
             client_ref: None,
             tool_actors,
+            enable_tool_api,
         }
     }
     
@@ -270,14 +318,17 @@ impl SubAgentChatActor {
     }
     
     fn build_tools(&self) -> Vec<Tool> {
+        // If this sub-agent is not allowed to use the function-calling API, return an empty list.
+        if !self.enable_tool_api {
+            return Vec::new();
+        }
+
         let mut tools = Vec::new();
-        
         // Only include tools we have actors for
         for tool_name in self.tool_actors.keys() {
             let tool = self.create_tool_definition(tool_name);
             tools.push(tool);
         }
-        
         tools
     }
     
@@ -327,5 +378,24 @@ impl SubAgentChatActor {
                 parameters,
             },
         }
+    }
+
+    /// Extract <tool_call name="...">JSON</tool_call> blocks from the model output.
+    /// Returns Vec<(tool_name, parameters_json)>.
+    fn extract_xml_tool_calls(text: &str) -> Vec<(String, serde_json::Value)> {
+        let mut calls = Vec::new();
+        // Lazy static regex would be ideal but simple compile every time is fine here.
+        let re = regex::Regex::new(r#"(?s)<tool_call\s+name=\"([^\"]+)\">(.*?)</tool_call>"#).unwrap();
+        for cap in re.captures_iter(text) {
+            let name = cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+            let args_str = cap.get(2).map(|m| m.as_str().trim()).unwrap_or("");
+            match serde_json::from_str::<serde_json::Value>(args_str) {
+                Ok(params) => calls.push((name, params)),
+                Err(e) => {
+                    tracing::warn!("Failed to parse tool_call JSON for {}: {}", name, e);
+                }
+            }
+        }
+        calls
     }
 }

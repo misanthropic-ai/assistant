@@ -35,15 +35,18 @@ pub struct SubAgentActor {
 /// Sub-agent state
 pub struct SubAgentState {
     /// Reference to our own client actor
+    #[allow(dead_code)]
     client_ref: Option<ActorRef<ClientMessage>>,
     
     /// Reference to our own chat actor
     chat_ref: Option<ActorRef<ChatMessage>>,
     
     /// Tool actors available to this sub-agent
+    #[allow(dead_code)]
     tool_actors: HashMap<String, ActorRef<ToolMessage>>,
     
     /// Active requests
+    #[allow(dead_code)]
     active_requests: HashMap<Uuid, oneshot::Sender<String>>,
     
     /// Reply-to references for each request
@@ -146,8 +149,11 @@ impl Actor for SubAgentActor {
         ).await?;
         tool_actors.insert("web_fetch".to_string(), web_fetch_ref.clone());
         
+        // Determine if the OpenAI "tools" API should be used for this sub-agent
+        let enable_tool_api = self.tool_config.use_tool_api;
+
         // Create sub-agent's own chat actor with tool actors
-        let chat_actor = SubAgentChatActor::new(sub_config.clone(), tool_actors.clone())
+        let chat_actor = SubAgentChatActor::new(sub_config.clone(), tool_actors.clone(), enable_tool_api)
             .with_client_ref(client_ref.clone());
         let (chat_ref, _) = Actor::spawn(
             Some(format!("sub-chat-{}", self.tool_name)),

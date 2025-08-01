@@ -8,6 +8,7 @@ use crate::messages::{ToolMessage, ChatMessage};
 
 /// Actor for fetching and processing web content
 pub struct WebFetchActor {
+    #[allow(dead_code)]
     config: Config,
     client: Client,
 }

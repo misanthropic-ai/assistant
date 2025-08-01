@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
 
 pub struct ReadManyFilesActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

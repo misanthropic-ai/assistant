@@ -10,6 +10,7 @@ use crate::messages::{ToolMessage, ChatMessage};
 
 /// Actor for executing bash commands
 pub struct BashActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

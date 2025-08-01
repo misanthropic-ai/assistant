@@ -8,6 +8,7 @@ use crate::messages::{ToolMessage, ChatMessage};
 /// for tools that need more complex behavior.
 pub struct BaseToolActor {
     name: String,
+    #[allow(dead_code)]    
     config: Config,
 }
 

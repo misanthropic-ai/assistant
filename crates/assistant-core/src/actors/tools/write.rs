@@ -8,6 +8,7 @@ use crate::utils::path::validate_path_access;
 
 /// Actor for writing files
 pub struct WriteActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

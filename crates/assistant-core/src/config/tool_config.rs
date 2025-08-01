@@ -26,6 +26,10 @@ pub struct ToolConfig {
     
     /// System prompt for delegated tool
     pub system_prompt: Option<String>,
+
+    /// Whether this tool should use the OpenAI "tools" API (function calling). Defaults to true.
+    #[serde(default = "default_true")]
+    pub use_tool_api: bool,
     
     /// Tool-specific settings
     #[serde(flatten)]
@@ -81,6 +85,7 @@ impl Default for ToolConfig {
             model: None,
             temperature: None,
             system_prompt: None,
+            use_tool_api: true,
             settings: HashMap::new(),
         }
     }
@@ -103,6 +108,7 @@ impl ToolConfig {
             model: Some(model),
             temperature: None,
             system_prompt: Some(system_prompt),
+            use_tool_api: true,
             settings: HashMap::new(),
         }
     }

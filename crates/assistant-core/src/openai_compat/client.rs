@@ -10,6 +10,7 @@ use super::types::*;
 pub struct OpenAICompatClient {
     client: reqwest::Client,
     base_url: String,
+    #[allow(dead_code)]
     api_key: String,
 }
 

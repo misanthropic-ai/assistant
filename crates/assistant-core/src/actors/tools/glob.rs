@@ -8,6 +8,7 @@ use crate::utils::path::{resolve_path, validate_path_access};
 
 /// Actor for finding files using glob patterns
 pub struct GlobActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

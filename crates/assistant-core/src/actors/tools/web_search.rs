@@ -8,6 +8,7 @@ use crate::messages::{ToolMessage, ChatMessage};
 
 /// Actor for performing web searches using DuckDuckGo
 pub struct WebSearchActor {
+    #[allow(dead_code)]
     config: Config,
     client: Client,
 }

@@ -8,6 +8,7 @@ use chrono::{DateTime, Local};
 
 /// Actor for listing directory contents
 pub struct LsActor {
+    #[allow(dead_code)]
     config: Config,
 }
 

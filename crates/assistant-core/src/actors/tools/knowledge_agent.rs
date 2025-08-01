@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 /// Actor for knowledge synthesis and intelligent information retrieval
 pub struct KnowledgeAgentActor {
+    #[allow(dead_code)]
     config: Config,
     db: Arc<Database>,
     embedding_client: Option<Arc<dyn EmbeddingClient + Send + Sync>>,

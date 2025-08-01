@@ -9,6 +9,7 @@ use crate::utils::path::{resolve_path, validate_path_access};
 
 /// Actor for searching file contents using regular expressions
 pub struct GrepActor {
+    #[allow(dead_code)]
     config: Config,
 }
 
@@ -129,7 +130,9 @@ struct SearchResult {
     file_path: String,
     line_number: Option<u64>,
     line_content: String,
+    #[allow(dead_code)]
     before_context: Vec<String>,
+    #[allow(dead_code)]
     after_context: Vec<String>,
 }
 

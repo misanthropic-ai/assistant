@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 /// Actor for memory/context management with semantic search
 pub struct MemoryActor {
+    #[allow(dead_code)]
     config: Config,
     db: Arc<Database>,
     embedding_client: Option<Arc<dyn EmbeddingClient + Send + Sync>>,
