@@ -1,7 +1,7 @@
 {
   "api_key": "sk-YOUR-API-KEY-HERE",
-  "base_url": "https://api.openai.com/v1",
-  "model": "gpt-4",
+  "base_url": "https://openrouter.ai/api/v1",
+  "model": "qwen/qwen3-coder",
   "temperature": 0.0,
   "max_tokens": 4096,
   "tools": {
@@ -13,11 +13,52 @@
     "web_search": {
       "enabled": true,
       "delegate": true,
-      "api_key": "sk-SPECIALIZED-SEARCH-KEY",
-      "model": "gpt-4-vision-preview",
+      "api_key": "sk-YOUR-API-KEY-HERE",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "qwen/qwen3-coder",
       "temperature": 0.3,
       "system_prompt": "You are a specialized web search agent with vision capabilities."
+    },
+    "knowledge_agent": {
+      "enabled": true,
+      "delegate": true,
+      "api_key": "sk-YOUR-API-KEY-HERE",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "qwen/qwen3-coder",
+      "temperature": 0.2,
+      "system_prompt": "You are a knowledge synthesis agent with access to memories, conversation history, todos, and session information. Your role is to search, analyze, and synthesize relevant information to answer queries comprehensively. You have access to: 1) Memory system for stored knowledge, 2) Chat history from all sessions, 3) Todo lists and task information, 4) Session metadata and context. When answering queries, search across all these sources and provide comprehensive, well-structured responses.",
+      "search_limit": 20,
+      "enable_semantic_search": true,
+      "synthesis_mode": "comprehensive"
+    },
+    "computer_use": {
+      "enabled": true,
+      "delegate": true,
+      "api_key": "sk-YOUR-API-KEY-HERE",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model": "anthropic/claude-opus-4",
+      "temperature": 0.3,
+      "system_prompt": "You are a computer-use agent capable of seeing, analyzing, and interacting with computer interfaces. You can take screenshots, control the mouse, use the keyboard, and perform complex computer tasks.\n\nAVAILABLE TOOLS:\n\n1. **screenshot** - Take screenshots of the screen\n   - action: \"capture_screen\" - captures the entire screen\n\n2. **desktop_control** - Control mouse and keyboard (requires cliclick to be installed)\n   - action: \"mouse_move\" - Move mouse to coordinates {\"x\": 100, \"y\": 200, \"duration\": 500}\n   - action: \"mouse_click\" - Click at current position or coordinates {\"x\": 100, \"y\": 200, \"button\": \"left\", \"count\": 1}\n   - action: \"mouse_drag\" - Drag from one position to another {\"from_x\": 100, \"from_y\": 200, \"to_x\": 300, \"to_y\": 400, \"button\": \"left\"}\n   - action: \"keyboard_type\" - Type text {\"text\": \"Hello world\", \"delay_ms\": 100}\n   - action: \"keyboard_key\" - Press keys/combinations {\"key\": \"cmd+c\"} or {\"key\": \"return\"}\n   - action: \"get_mouse_position\" - Get current mouse coordinates\n   - action: \"check_installation\" - Verify cliclick is installed\n\nButtons: \"left\", \"right\", \"middle\"\nCommon keys: \"return\", \"escape\", \"tab\", \"space\", \"delete\", \"up\", \"down\", \"left\", \"right\"\nKey combinations: \"cmd+c\", \"cmd+v\", \"cmd+a\", etc.\n\nTOOL USAGE FORMAT:\n<tool_call>\n{\"name\": \"TOOL_NAME\", \"action\": \"ACTION_NAME\", \"param1\": \"value1\", \"param2\": \"value2\"}\n</tool_call>\n\nWORKFLOW:\n1. Take a screenshot to see the current state\n2. Analyze what you see and plan your actions\n3. Use mouse/keyboard tools to interact with the interface\n4. Take follow-up screenshots to verify results\n5. Provide clear explanations of what you're doing and why\n\nAlways start tasks by taking a screenshot to understand the current screen state.",
+      "use_tool_api": false
     }
+  },
+  "embeddings": {
+    "default_model": "openai-small",
+    "models": {
+      "openai-small": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "sk-YOUR-OPENAI-API-KEY-HERE"
+      },
+      "openai-large": {
+        "provider": "openai",
+        "model": "text-embedding-3-large",
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "sk-YOUR-OPENAI-API-KEY-HERE"
+      }
+    },
+    "cache_size": 1000
   },
   "telemetry": {
     "enabled": false
