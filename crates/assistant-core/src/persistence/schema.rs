@@ -48,6 +48,18 @@ pub struct MemoryRecord {
     pub metadata: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TuiSessionRecord {
+    pub id: String,
+    pub chat_session_id: Option<String>,
+    pub tmux_session_name: String,
+    pub command: String,
+    pub status: String, // active, paused, terminated
+    pub created_at: DateTime<Utc>,
+    pub last_accessed: DateTime<Utc>,
+    pub metadata: Option<serde_json::Value>,
+}
+
 pub const SCHEMA_SQL: &str = r#"
 -- Sessions table with chat persistence fields
 CREATE TABLE IF NOT EXISTS sessions (
@@ -165,6 +177,19 @@ CREATE TRIGGER IF NOT EXISTS chat_messages_ad AFTER DELETE ON chat_messages BEGI
     DELETE FROM chat_messages_fts WHERE rowid = old.rowid;
 END;
 
+-- TUI sessions table
+CREATE TABLE IF NOT EXISTS tui_sessions (
+    id TEXT PRIMARY KEY,
+    chat_session_id TEXT,
+    tmux_session_name TEXT NOT NULL UNIQUE,
+    command TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT,
+    FOREIGN KEY (chat_session_id) REFERENCES sessions(id)
+);
+
 -- Indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
@@ -174,4 +199,6 @@ CREATE INDEX IF NOT EXISTS idx_todos_session_id ON todos(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_key ON memories(key);
 CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_memories_accessed_at ON memories(accessed_at);
+CREATE INDEX IF NOT EXISTS idx_tui_sessions_status ON tui_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_tui_sessions_chat_session ON tui_sessions(chat_session_id);
 "#;

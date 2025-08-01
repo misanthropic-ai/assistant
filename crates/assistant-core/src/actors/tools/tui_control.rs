@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use crate::config::Config;
 use crate::messages::{ToolMessage, ChatMessage};
+use crate::persistence::{Database, TuiSessionManager};
 use anyhow::Result;
 use std::process::Command;
 use std::collections::HashMap;
@@ -12,12 +13,15 @@ use uuid::Uuid;
 pub struct TuiControlActor {
     #[allow(dead_code)]
     config: Config,
+    session_manager: Option<TuiSessionManager>,
 }
 
 /// State tracking active TUI sessions
 pub struct TuiControlState {
     /// Map of session IDs to tmux session names
     sessions: HashMap<Uuid, TmuxSession>,
+    /// Current chat session ID (if available)
+    chat_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +98,30 @@ pub struct TuiScreen {
 
 impl TuiControlActor {
     pub fn new(config: Config) -> Self {
-        Self { config }
+        Self { 
+            config,
+            session_manager: None,
+        }
+    }
+    
+    /// Create with database persistence
+    pub async fn with_persistence(config: Config) -> Result<Self> {
+        // Get database path from config
+        let db_path = config.session.database_path.clone()
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                    .join(".assistant")
+                    .join("assistant.db")
+            });
+        
+        let database = Database::new(&db_path).await?;
+        let session_manager = TuiSessionManager::new(database);
+        
+        Ok(Self { 
+            config,
+            session_manager: Some(session_manager),
+        })
     }
     
     /// Generate a unique tmux session name
@@ -300,8 +327,39 @@ impl Actor for TuiControlActor {
         _myself: ActorRef<Self::Msg>,
         _config: Self::Arguments,
     ) -> Result<Self::State, ActorProcessingErr> {
+        // Verify existing sessions if persistence is enabled
+        if let Some(ref manager) = self.session_manager {
+            if let Err(e) = manager.verify_sessions().await {
+                tracing::warn!("Failed to verify TUI sessions: {}", e);
+            }
+            
+            // Load active sessions from database
+            match manager.list_active_sessions().await {
+                Ok(db_sessions) => {
+                    let mut sessions = HashMap::new();
+                    for db_session in db_sessions {
+                        if let Ok(uuid) = Uuid::parse_str(&db_session.id) {
+                            sessions.insert(uuid, TmuxSession {
+                                name: db_session.tmux_session_name,
+                                command: db_session.command,
+                                created_at: std::time::Instant::now(),
+                            });
+                        }
+                    }
+                    return Ok(TuiControlState {
+                        sessions,
+                        chat_session_id: None,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load TUI sessions from database: {}", e);
+                }
+            }
+        }
+        
         Ok(TuiControlState {
             sessions: HashMap::new(),
+            chat_session_id: None,
         })
     }
     
@@ -334,6 +392,17 @@ impl Actor for TuiControlActor {
                                     created_at: std::time::Instant::now(),
                                 });
                                 
+                                // Persist to database if available
+                                if let Some(ref manager) = self.session_manager {
+                                    if let Err(e) = manager.create_session(
+                                        state.chat_session_id.as_deref(),
+                                        &session_name,
+                                        &command,
+                                    ).await {
+                                        tracing::warn!("Failed to persist TUI session: {}", e);
+                                    }
+                                }
+                                
                                 json!({
                                     "success": true,
                                     "session_id": session_id,
@@ -356,6 +425,13 @@ impl Actor for TuiControlActor {
                         
                         match session {
                             Some(session) => {
+                                // Update last accessed time in database
+                                if let Some(ref manager) = self.session_manager {
+                                    if let Some(db_session) = manager.get_session_by_tmux_name(&session.name).await.ok().flatten() {
+                                        let _ = manager.update_last_accessed(&db_session.id).await;
+                                    }
+                                }
+                                
                                 match self.capture_screen(&session.name, include_ansi).await {
                                     Ok(screen) => {
                                         serde_json::to_string(&json!({
@@ -447,6 +523,13 @@ impl Actor for TuiControlActor {
                         
                         match session {
                             Some(session) => {
+                                // Update status in database
+                                if let Some(ref manager) = self.session_manager {
+                                    if let Some(db_session) = manager.get_session_by_tmux_name(&session.name).await.ok().flatten() {
+                                        let _ = manager.update_status(&db_session.id, "terminated").await;
+                                    }
+                                }
+                                
                                 match self.end_session(&session.name).await {
                                     Ok(()) => json!({
                                         "success": true,

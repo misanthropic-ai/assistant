@@ -276,7 +276,17 @@ pub async fn run_tool(tool_name: &str, params: Value, config_path: Option<&str>)
                 actor_ref
             }
             "tui_control" => {
-                let actor = TuiControlActor::new(config.clone());
+                // Try to create with persistence, fall back to without
+                let actor = match TuiControlActor::with_persistence(config.clone()).await {
+                    Ok(actor) => {
+                        tracing::info!("TUI control actor created with persistence");
+                        actor
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to create TUI control with persistence: {}, using in-memory only", e);
+                        TuiControlActor::new(config.clone())
+                    }
+                };
                 let (actor_ref, _) = Actor::spawn(
                     Some(tool_name.to_string()),
                     actor,
