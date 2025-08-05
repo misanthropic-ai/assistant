@@ -421,13 +421,20 @@ impl TuiApp {
                 self.state.add_message(MessageType::Error, error);
             }
             ChatMessage::ToolRequest { id: _, call } => {
+                // Format the tool call parameters for display
+                let params_str = if let Ok(formatted) = serde_json::to_string_pretty(&call.parameters) {
+                    formatted
+                } else {
+                    call.parameters.to_string()
+                };
+                
                 self.state.add_message(
                     MessageType::Tool { name: call.tool_name.clone() }, 
-                    format!("Calling tool: {}", call.tool_name)
+                    format!("🔧 Calling {}: {}", call.tool_name, params_str)
                 );
             }
             ChatMessage::ToolResult { id: _, result } => {
-                self.state.add_message(MessageType::Info, result);
+                self.state.add_message(MessageType::Info, format!("📋 Tool result: {}", result));
             }
             _ => {}
         }
@@ -515,12 +522,34 @@ impl TuiApp {
                                 tracing::info!("Message {}: User - {}", idx, text);
                                 self.state.add_message(MessageType::User, text);
                             }
-                            assistant_core::openai_compat::ChatMessage::Assistant { content, .. } => {
+                            assistant_core::openai_compat::ChatMessage::Assistant { content, tool_calls, .. } => {
+                                // First add the assistant message if it has content
                                 if let Some(text) = content {
                                     tracing::info!("Message {}: Assistant - {}", idx, text);
                                     self.state.add_message(MessageType::Assistant, text.clone());
-                                } else {
-                                    tracing::info!("Message {}: Assistant with no content", idx);
+                                } else if tool_calls.is_none() || tool_calls.as_ref().map(|tc| tc.is_empty()).unwrap_or(true) {
+                                    tracing::info!("Message {}: Assistant with no content and no tool calls", idx);
+                                }
+                                
+                                // Then add tool request messages for each tool call
+                                if let Some(calls) = tool_calls {
+                                    for tool_call in calls {
+                                        let tool_name = &tool_call.function.name;
+                                        let params_str = &tool_call.function.arguments;
+                                        
+                                        // Parse the arguments for pretty printing
+                                        let formatted_params = if let Ok(params_json) = serde_json::from_str::<serde_json::Value>(params_str) {
+                                            serde_json::to_string_pretty(&params_json).unwrap_or_else(|_| params_str.clone())
+                                        } else {
+                                            params_str.clone()
+                                        };
+                                        
+                                        tracing::info!("Message {}: Tool call - {} with params: {}", idx, tool_name, formatted_params);
+                                        self.state.add_message(
+                                            MessageType::Tool { name: tool_name.clone() },
+                                            format!("🔧 Calling {}: {}", tool_name, formatted_params)
+                                        );
+                                    }
                                 }
                             }
                             assistant_core::openai_compat::ChatMessage::System { .. } => {

@@ -154,9 +154,8 @@ impl Actor for ChatActor {
             }
             
             ChatMessage::ToolRequest { id, call } => {
-                // This is now handled in AssistantResponse
-                tracing::warn!("Received legacy ToolRequest message - this should be handled via AssistantResponse");
-                state.history.push_back(ChatMessage::ToolRequest { id, call: call.clone() });
+                // Just add to history - actual tool requests are sent from AssistantResponse
+                state.history.push_back(ChatMessage::ToolRequest { id, call });
             }
             
             ChatMessage::ToolResult { id, result } => {
@@ -251,6 +250,19 @@ impl Actor for ChatActor {
                     
                     // Track the tool call
                     state.active_tool_calls.insert(tool_id, call.tool_name.clone());
+                    
+                    // Send tool request message to display actors
+                    let tool_request_msg = ChatMessage::ToolRequest { 
+                        id: tool_id, 
+                        call: call.clone() 
+                    };
+                    
+                    // Send to display actors
+                    if let Some(context) = &state.current_context {
+                        if let Some(display_ref) = state.display_refs.get(context) {
+                            let _ = display_ref.send_message(tool_request_msg);
+                        }
+                    }
                     
                     // Send tool request to delegator
                     if let Some(ref delegator_ref) = state.delegator_ref {
@@ -359,40 +371,33 @@ impl ChatActor {
     fn get_system_prompt(&self) -> String {
         r#"You are a helpful AI assistant with access to various tools. 
 
-IMPORTANT: Memory Management
-- You have a memory tool that allows you to store and retrieve information persistently across conversations
-- Use the memory tool to:
-  - Store important facts, concepts, or information the user shares with you
-  - Search your memory when asked about topics you might have stored
-  - Retrieve specific memories when needed
-  - Keep track of user preferences or important context
+IMPORTANT: Knowledge and Memory Management
+- You have access to a knowledge_agent tool that can search and synthesize information from:
+  - Persistent memory storage with semantic search
+  - Conversation history from all sessions
+  - Todo lists and task information
+  - Session metadata and context
 
-Memory Tool Guidelines:
-1. When a user shares important information, proactively store it in memory with appropriate metadata
-2. When asked about something, ALWAYS search your memory first before responding from general knowledge
-3. Use semantic search to find related concepts even if keywords don't match exactly
-4. Store memories with descriptive keys and rich metadata for better organization
-5. Periodically check memory stats to understand what information you have stored
+Knowledge Agent Guidelines:
+1. When a user shares important information, use the knowledge_agent to store it
+2. When asked about something, ALWAYS use the knowledge_agent to search first
+3. The knowledge_agent handles all memory operations internally
+4. For complex queries, the knowledge_agent can synthesize information from multiple sources
 
-Memory Management Operations:
-- CREATE: Use 'store' for auto-generated keys or 'store_with_key' for specific keys
-- READ: Use 'retrieve' for exact key lookup or 'search' for finding related memories
-- UPDATE: Use 'update' to modify existing memories (content and/or metadata)
-- DELETE: Use 'delete' to remove specific memories or 'clear' to remove all
-
-When to use each operation:
-- store_with_key: Creating new memories or completely replacing existing ones
-- update: Modifying parts of existing memories while preserving other data
-- delete: Removing outdated or incorrect information
-- merge_metadata: When updating, set to true to add new metadata fields without losing existing ones
+Common knowledge_agent actions:
+- search: Find relevant information across all knowledge sources
+- store: Store new information in memory with optional key and metadata
+- get_details: Get specific details about an item
+- analyze: Perform deep analysis on a topic
+- synthesize: Create comprehensive summaries combining multiple sources
 
 Examples:
-- User: "My favorite programming language is Python" → Store with key "user_favorite_language"
-- User: "Actually, I prefer Rust now" → Update the existing memory
-- User: "Forget what I said about X" → Delete the specific memory
-- User: "What do you know about X?" → Search memory for X before answering
+- User: "Remember that my favorite language is Python" → Use knowledge_agent with action: "store", content: "User's favorite programming language is Python", key: "user_favorite_language"
+- User: "What do you know about me?" → Use knowledge_agent with action: "search" query: "user preferences personal information"
+- User: "What have we discussed before?" → Use knowledge_agent with action: "search" in chat_history
+- User: "I work at OpenAI" → Use knowledge_agent with action: "store", content: "User works at OpenAI", metadata: {"type": "personal_info", "category": "employment"}
 
-Always be transparent about using the memory tool - let users know when you're storing, updating, or retrieving information."#.to_string()
+Always be transparent about using the knowledge_agent - let users know when you're searching or storing information."#.to_string()
     }
     
     fn build_tools(&self) -> Vec<Tool> {
@@ -401,7 +406,7 @@ Always be transparent about using the memory tool - let users know when you're s
         // Define tools based on config
         let tool_names = [
             "read", "edit", "write", "ls", "glob", "grep",
-            "bash", "web_search", "web_fetch", "todo", "memory", "knowledge_agent",
+            "bash", "web_search", "web_fetch", "todo", "knowledge_agent",
             "screenshot", "desktop_control", "computer_use"
         ];
         
@@ -601,61 +606,6 @@ Always be transparent about using the memory tool - let users know when you're s
                     "required": ["operation"]
                 })
             ),
-            "memory" => (
-                "Store and search information in persistent memory with semantic search",
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["store", "store_with_key", "retrieve", "search", "list", "update", "delete", "clear", "stats"],
-                            "description": "The memory action to perform"
-                        },
-                        "key": {
-                            "type": "string",
-                            "description": "Memory key (for store_with_key, retrieve, update, delete)"
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Content to store or update (for store, store_with_key, update)"
-                        },
-                        "query": {
-                            "type": "string",
-                            "description": "Search query (for search)"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Maximum results to return (for search, default: 10)"
-                        },
-                        "mode": {
-                            "type": "string",
-                            "enum": ["hybrid", "semantic", "keyword", "exact"],
-                            "description": "Search mode (for search, default: hybrid)"
-                        },
-                        "metadata": {
-                            "type": "object",
-                            "description": "Metadata to store or update with memory (optional)"
-                        },
-                        "merge_metadata": {
-                            "type": "boolean",
-                            "description": "Merge metadata instead of replacing (for update, default: false)"
-                        },
-                        "metadata_filter": {
-                            "type": "object",
-                            "description": "Filter search by metadata (optional)"
-                        },
-                        "prefix": {
-                            "type": "string",
-                            "description": "Filter list by key prefix (optional)"
-                        },
-                        "session_only": {
-                            "type": "boolean",
-                            "description": "Clear only session memories (for clear, default: false)"
-                        }
-                    },
-                    "required": ["action"]
-                })
-            ),
             "knowledge_agent" => (
                 "Search and synthesize knowledge from memories, chat history, todos, and sessions. This tool uses a dedicated sub-agent that can search across all stored information and provide comprehensive analysis",
                 serde_json::json!({
@@ -663,12 +613,24 @@ Always be transparent about using the memory tool - let users know when you're s
                     "properties": {
                         "action": {
                             "type": "string",
-                            "enum": ["search", "get_details", "analyze", "synthesize"],
+                            "enum": ["search", "store", "get_details", "analyze", "synthesize"],
                             "description": "The action to perform"
                         },
                         "query": {
                             "type": "string",
                             "description": "Search query (for search action)"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to store (for store action)"
+                        },
+                        "key": {
+                            "type": "string",
+                            "description": "Optional key for the stored memory (for store action)"
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Optional metadata to attach to the memory (for store action)"
                         },
                         "topic": {
                             "type": "string",

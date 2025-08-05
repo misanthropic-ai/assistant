@@ -16,6 +16,7 @@ use chrono::{Utc, DateTime};
 use sqlx::Row;
 use std::sync::Arc;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// Actor for knowledge synthesis and intelligent information retrieval
 pub struct KnowledgeAgentActor {
@@ -43,6 +44,14 @@ pub enum KnowledgeAction {
         source_filter: Option<Vec<KnowledgeSource>>,
         #[serde(default)]
         time_filter: Option<TimeFilter>,
+    },
+    /// Store information in memory
+    Store {
+        content: String,
+        #[serde(default)]
+        key: Option<String>,
+        #[serde(default)]
+        metadata: Option<serde_json::Value>,
     },
     /// Get detailed information about a specific item
     GetDetails {
@@ -563,6 +572,57 @@ impl KnowledgeAgentActor {
             }
         }
     }
+    
+    async fn store_in_memory(&self, content: String, key: Option<String>, metadata: Option<serde_json::Value>, state: &KnowledgeAgentState) -> String {
+        // For now, directly store in the database
+        // In the future, this could delegate to a memory tool actor if available
+        
+        let memory_key = key.unwrap_or_else(|| {
+            // Generate a key based on content if not provided
+            let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+            format!("knowledge_{}", timestamp)
+        });
+        
+        // Prepare the metadata
+        let metadata_str = metadata.map(|m| m.to_string());
+        
+        // Generate embedding if available
+        let embedding = if let Some(client) = &state.embedding_client {
+            match client.embed(&content).await {
+                Ok(embedding) => {
+                    let embedding_json = serde_json::to_string(&embedding).ok();
+                    embedding_json
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to generate embedding: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        
+        // Store in database
+        let result = sqlx::query(
+            "INSERT INTO memories (id, key, content, metadata, embedding, created_at, accessed_at, access_count) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(&memory_key)
+        .bind(&content)
+        .bind(metadata_str.as_ref())
+        .bind(embedding.as_ref())
+        .bind(Utc::now())
+        .bind(Utc::now())
+        .bind(1)
+        .execute(state.db.pool())
+        .await;
+        
+        match result {
+            Ok(_) => format!("Successfully stored memory with key: {}", memory_key),
+            Err(e) => format!("Failed to store memory: {}", e),
+        }
+    }
 }
 
 impl Actor for KnowledgeAgentActor {
@@ -634,6 +694,10 @@ impl Actor for KnowledgeAgentActor {
                             }
                             Err(e) => format!("Error synthesizing knowledge: {}", e),
                         }
+                    }
+                    KnowledgeAction::Store { content, key, metadata } => {
+                        // Use the memory tool to store the information
+                        self.store_in_memory(content, key, metadata, state).await
                     }
                 };
                 
