@@ -137,17 +137,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "assistant"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assistant-cli",
+ "assistant-core",
+ "assistant-tui",
+ "clap",
+ "crossterm 0.29.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "assistant-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "assistant-core",
+ "assistant-tui",
  "chrono",
  "clap",
- "crossterm 0.29.0",
  "dirs 5.0.1",
  "futures",
- "ratatui",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -177,7 +191,7 @@ dependencies = [
  "html2text",
  "lru 0.16.0",
  "ndarray",
- "ractor",
+ "ractor 0.15.6",
  "regex",
  "reqwest",
  "scraper",
@@ -200,6 +214,23 @@ dependencies = [
  "urlencoding",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "assistant-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assistant-core",
+ "chrono",
+ "crossterm 0.29.0",
+ "futures",
+ "ractor 0.14.7",
+ "ratatui",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -789,6 +820,7 @@ dependencies = [
  "crossterm_winapi",
  "derive_more 2.0.1",
  "document-features",
+ "futures-core",
  "mio",
  "parking_lot",
  "rustix 1.0.8",
@@ -3323,6 +3355,21 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "ractor"
+version = "0.14.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d65972a0286ef14c43c6daafbac6cf15e96496446147683b2905292c35cc178"
+dependencies = [
+ "bon",
+ "dashmap",
+ "futures",
+ "once_cell",
+ "strum",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "ractor"

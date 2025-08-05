@@ -14,6 +14,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
+use assistant_core::messages::UserMessageContent;
 
 struct TestSystem {
     chat: ActorRef<ChatMessage>,
@@ -178,7 +179,7 @@ async fn test_user_prompt_persistence() {
     system.chat
         .send_message(ChatMessage::UserPrompt {
             id: request_id,
-            prompt: "Hello, assistant!".to_string(),
+            content: UserMessageContent::Text("Hello, assistant!".to_string()),
             context: DisplayContext::CLI,
         })
         .expect("Failed to send user prompt");
@@ -200,9 +201,11 @@ async fn test_user_prompt_persistence() {
     // Verify we received display messages
     let mut received_user_prompt = false;
     while let Ok(msg) = system.display_rx.try_recv() {
-        if let ChatMessage::UserPrompt { prompt, .. } = msg {
-            if prompt == "Hello, assistant!" {
-                received_user_prompt = true;
+        if let ChatMessage::UserPrompt { content, .. } = msg {
+            if let UserMessageContent::Text(text) = content {
+                if text == "Hello, assistant!" {
+                    received_user_prompt = true;
+                }
             }
         }
     }
@@ -219,7 +222,7 @@ async fn test_tool_call_persistence() {
     system.chat
         .send_message(ChatMessage::UserPrompt {
             id: request_id,
-            prompt: "Store a memory that I like pizza".to_string(),
+            content: UserMessageContent::Text("Store a memory that I like pizza".to_string()),
             context: DisplayContext::CLI,
         })
         .expect("Failed to send user prompt");
@@ -265,7 +268,7 @@ async fn test_concurrent_message_persistence() {
             chat_ref
                 .send_message(ChatMessage::UserPrompt {
                     id: request_id,
-                    prompt: format!("Message {}", i),
+                    content: UserMessageContent::Text(format!("Message {}", i)),
                     context: DisplayContext::CLI,
                 })
                 .expect("Failed to send message");
@@ -310,7 +313,7 @@ async fn test_error_recovery() {
     system.chat
         .send_message(ChatMessage::UserPrompt {
             id: Uuid::new_v4(),
-            prompt: "This should still work".to_string(),
+            content: UserMessageContent::Text("This should still work".to_string()),
             context: DisplayContext::CLI,
         })
         .expect("System should still accept messages after error");

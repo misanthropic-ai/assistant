@@ -43,6 +43,7 @@ enum Commands {
         #[command(subcommand)]
         command: TuiCommands,
     },
+    
 }
 
 #[derive(Subcommand)]
@@ -68,11 +69,7 @@ mod tool_runner;
 mod prompt_runner;
 mod actor_init;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
-    
+pub async fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     
     match cli.command {
@@ -231,6 +228,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        
     }
     
     Ok(())

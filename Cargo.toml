@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/assistant-core", "crates/assistant-cli"]
+members = ["crates/assistant-core", "crates/assistant-cli", "crates/assistant-tui"]
 resolver = "2"
 
 [workspace.package]
@@ -7,3 +7,25 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Assistant Contributors"]
 license = "MIT OR Apache-2.0"
+
+[package]
+name = "assistant"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "assistant"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+assistant-core = { path = "crates/assistant-core" }
+assistant-cli = { path = "crates/assistant-cli" }
+assistant-tui = { path = "crates/assistant-tui" }
+clap = { version = "4.5", features = ["derive", "env"] }
+tokio = { version = "1.46", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossterm = "0.29.0"
