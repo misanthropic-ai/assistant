@@ -55,11 +55,7 @@ fn create_message_item(message: &Message) -> ListItem {
         }
     }
     
-    if message.is_streaming {
-        if let Some(last_line) = lines.last_mut() {
-            last_line.spans.push(Span::styled("▌", Style::default().fg(Color::White).add_modifier(Modifier::RAPID_BLINK)));
-        }
-    }
+    // Don't show visual cursor for streaming messages
     
     ListItem::new(Text::from(lines))
 }
