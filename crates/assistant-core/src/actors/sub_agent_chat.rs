@@ -257,20 +257,33 @@ impl Actor for SubAgentChatActor {
                 // ------------------------------------------------------------------
                 // Process tool calls coming from the OpenAI function-calling API
                 // ------------------------------------------------------------------
-                for call in tool_calls {
-                    let tool_id = Uuid::new_v4();
-                    if let Some(tool_ref) = self.tool_actors.get(&call.tool_name) {
-                        state.pending_tool_calls.insert(tool_id, (call.tool_name.clone(), myself.clone()));
-                        tool_ref.send_message(ToolMessage::Execute {
-                            id: tool_id,
-                            params: call.parameters,
-                            chat_ref: myself.clone(),
-                        })?;
-                    } else {
-                        tracing::error!("Tool actor not found: {}", call.tool_name);
-                        myself.send_message(ChatMessage::ToolResult {
-                            id: tool_id,
-                            result: format!("Error: Tool '{}' not available", call.tool_name),
+                if !tool_calls.is_empty() {
+                    for call in tool_calls {
+                        let tool_id = Uuid::new_v4();
+                        if let Some(tool_ref) = self.tool_actors.get(&call.tool_name) {
+                            state.pending_tool_calls.insert(tool_id, (call.tool_name.clone(), myself.clone()));
+                            tool_ref.send_message(ToolMessage::Execute {
+                                id: tool_id,
+                                params: call.parameters,
+                                chat_ref: myself.clone(),
+                            })?;
+                        } else {
+                            tracing::error!("Tool actor not found: {}", call.tool_name);
+                            myself.send_message(ChatMessage::ToolResult {
+                                id: tool_id,
+                                result: format!("Error: Tool '{}' not available", call.tool_name),
+                            })?;
+                        }
+                    }
+                } else if self.enable_tool_api && content.is_some() {
+                    // When using function-calling API and no tool calls, this is the final response
+                    let response_text = content.as_ref().unwrap();
+                    if !response_text.trim().is_empty() {
+                        tracing::info!("Function-calling API: No tool calls, treating as final response");
+                        let completion_id = state.current_request.unwrap_or(id);
+                        myself.send_message(ChatMessage::Complete { 
+                            id: completion_id, 
+                            response: response_text.clone() 
                         })?;
                     }
                 }

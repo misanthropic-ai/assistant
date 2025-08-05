@@ -660,8 +660,11 @@ impl Actor for KnowledgeAgentActor {
                     }
                 };
                 
+                tracing::info!("KnowledgeAgent processing action: {:?}", action);
+                
                 let result = match action {
                     KnowledgeAction::Search { query, limit, source_filter, time_filter } => {
+                        tracing::info!("KnowledgeAgent searching for: {}", query);
                         match self.search_knowledge(&query, limit, source_filter, time_filter, state).await {
                             Ok(results) => serde_json::to_string_pretty(&results)
                                 .unwrap_or_else(|_| "Failed to format results".to_string()),

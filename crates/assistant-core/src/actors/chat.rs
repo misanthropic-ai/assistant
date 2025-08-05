@@ -177,9 +177,15 @@ impl Actor for ChatActor {
                     })?;
                 }
                 
+                // Prepend context to the tool result so the assistant knows it's from a tool
+                let contextualized_result = format!(
+                    "Tool '{}' response: {}\n\nPlease use this information to respond to the user's original request.",
+                    tool_name, result
+                );
+                
                 // Add tool result to messages
                 let tool_msg = OpenAIMessage::Tool {
-                    content: result,
+                    content: contextualized_result,
                     tool_call_id: id.to_string(),
                 };
                 state.messages.push(tool_msg);

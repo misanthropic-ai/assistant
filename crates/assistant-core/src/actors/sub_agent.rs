@@ -95,6 +95,7 @@ impl Actor for SubAgentActor {
         
         // Knowledge agent gets memory tool in addition to web tools
         if self.tool_name == "knowledge_agent" {
+            tracing::info!("Creating memory tool for knowledge_agent subagent");
             // Create memory actor for knowledge agent
             let memory_actor = match crate::actors::tools::memory::MemoryActor::new(sub_config.clone()).await {
                 Ok(actor) => actor,
@@ -109,6 +110,7 @@ impl Actor for SubAgentActor {
                 sub_config.clone(),
             ).await?;
             tool_actors.insert("memory".to_string(), memory_ref.clone());
+            tracing::info!("Memory tool created for knowledge_agent");
         }
         
         // Computer use agent gets screenshot and desktop_control tools in addition to web tools
@@ -196,9 +198,11 @@ impl Actor for SubAgentActor {
         match msg {
             SubAgentMessage::ExecuteQuery { id, query, reply_to } => {
                 tracing::warn!("Sub-agent {} executing query: {}", self.tool_name, query);
+                tracing::info!("Sub-agent {} request ID: {}", self.tool_name, id);
                 
                 // Store the reply reference
                 state.reply_refs.insert(id, reply_to);
+                tracing::debug!("Sub-agent {} stored reply ref for request {}", self.tool_name, id);
                 
                 // Prepare the prompt with system context
                 let full_prompt = if let Some(system_prompt) = &self.tool_config.system_prompt {
@@ -208,6 +212,8 @@ impl Actor for SubAgentActor {
                     query
                 };
                 
+                tracing::info!("Sub-agent {} sending to chat: {}", self.tool_name, full_prompt);
+                
                 // Send the query to our chat actor
                 if let Some(ref chat_ref) = state.chat_ref {
                     chat_ref.send_message(ChatMessage::UserPrompt {
@@ -215,6 +221,8 @@ impl Actor for SubAgentActor {
                         content: crate::messages::UserMessageContent::Text(full_prompt),
                         context: DisplayContext::SubAgent,
                     })?;
+                } else {
+                    tracing::error!("Sub-agent {} has no chat_ref!", self.tool_name);
                 }
             }
             
