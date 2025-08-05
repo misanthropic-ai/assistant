@@ -356,6 +356,9 @@ impl Actor for SubAgentChatActor {
             ChatMessage::SetPersistenceRef(_) => {
                 tracing::debug!("SubAgentChat ignoring SetPersistenceRef - no persistence needed");
             }
+            ChatMessage::SwitchSession { .. } => {
+                tracing::debug!("SubAgentChat ignoring SwitchSession - not applicable to sub-agents");
+            }
         }
         
         Ok(())

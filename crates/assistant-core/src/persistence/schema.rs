@@ -1,27 +1,40 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SessionSummary {
+    pub id: String,
+    pub name: Option<String>,
+    pub summary: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_accessed: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub message_count: i64,
+    pub last_message_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct SessionRecord {
     pub id: String,
     pub workspace_path: Option<String>,
     pub name: Option<String>,
     pub summary: Option<String>,
-    pub summary_embedding: Option<Vec<f32>>,
+    pub summary_embedding: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
     pub last_accessed: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub metadata: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ChatMessageRecord {
     pub id: String,
     pub session_id: String,
     pub role: String,
     pub content: Option<String>,
     pub tool_calls: Option<serde_json::Value>,
-    pub embedding: Option<Vec<f32>>,
+    pub embedding: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -41,7 +54,7 @@ pub struct MemoryRecord {
     pub id: String,
     pub key: String,
     pub content: String,
-    pub embedding: Option<Vec<f32>>,
+    pub embedding: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
     pub accessed_at: DateTime<Utc>,
     pub access_count: i32,

@@ -18,7 +18,7 @@ pub fn render_footer(area: Rect, buf: &mut Buffer, state: &AppState) {
     spans.push(Span::raw(" | "));
     
     spans.push(Span::styled(
-        "Ctrl+C: Exit | Ctrl+L: Clear | Ctrl+O: Errors | Tab: Complete",
+        "Ctrl+C: Exit | Ctrl+L: Clear | Ctrl+S: Sessions | Ctrl+O: Errors | Tab: Complete",
         Style::default().fg(Color::DarkGray),
     ));
     

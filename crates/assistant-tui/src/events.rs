@@ -70,6 +70,7 @@ pub fn handle_key_event(key: KeyEvent) -> Option<Action> {
         (KeyCode::Char('l'), KeyModifiers::CONTROL) => Some(Action::ClearScreen),
         (KeyCode::Char('o'), KeyModifiers::CONTROL) => Some(Action::ToggleErrorDetails),
         (KeyCode::Char('t'), KeyModifiers::CONTROL) => Some(Action::ToggleToolDescriptions),
+        (KeyCode::Char('s'), KeyModifiers::CONTROL) => Some(Action::ToggleConversationList),
         (KeyCode::Tab, _) => Some(Action::Autocomplete),
         (KeyCode::Up, _) => Some(Action::HistoryPrevious),
         (KeyCode::Down, _) => Some(Action::HistoryNext),
@@ -83,6 +84,7 @@ pub fn handle_key_event(key: KeyEvent) -> Option<Action> {
         (KeyCode::PageUp, _) => Some(Action::ScrollUp),
         (KeyCode::PageDown, _) => Some(Action::ScrollDown),
         (KeyCode::Esc, _) => Some(Action::Escape),
+        (KeyCode::Delete, _) => Some(Action::Delete),
         _ => None,
     }
 }
@@ -93,6 +95,7 @@ pub enum Action {
     ClearScreen,
     ToggleErrorDetails,
     ToggleToolDescriptions,
+    ToggleConversationList,
     Autocomplete,
     HistoryPrevious,
     HistoryNext,
@@ -106,4 +109,8 @@ pub enum Action {
     ScrollUp,
     ScrollDown,
     Escape,
+    Delete,
+    NewConversation,
+    RenameConversation,
+    SearchConversations,
 }

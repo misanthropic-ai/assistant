@@ -63,6 +63,12 @@ pub enum ChatMessage {
     
     /// Register a display actor for a context
     RegisterDisplay { context: DisplayContext, display_ref: ActorRef<ChatMessage> },
+    
+    /// Switch to a different conversation session
+    SwitchSession { 
+        session_id: String, 
+        messages: Vec<crate::openai_compat::ChatMessage>,
+    },
 }
 
 /// Tool call information

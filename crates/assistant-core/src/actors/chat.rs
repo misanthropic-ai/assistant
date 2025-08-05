@@ -210,6 +210,22 @@ impl Actor for ChatActor {
                     tool_calls: tool_calls.clone() 
                 });
                 
+                // Build the OpenAI assistant message with tool calls first
+                let openai_tool_calls = if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls.iter().enumerate().map(|(_idx, call)| {
+                        crate::openai_compat::ToolCall {
+                            id: format!("call_{}", Uuid::new_v4()),
+                            tool_type: "function".to_string(),
+                            function: crate::openai_compat::FunctionCall {
+                                name: call.tool_name.clone(),
+                                arguments: call.parameters.to_string(),
+                            },
+                        }
+                    }).collect())
+                };
+                
                 // Persist assistant response immediately
                 if content.is_some() || !tool_calls.is_empty() {
                     if let Some(ref persistence_ref) = state.persistence_ref {
@@ -217,24 +233,9 @@ impl Actor for ChatActor {
                             id,
                             session_id: state.session_id.clone(),
                             response: content.clone().unwrap_or_default(),
+                            tool_calls: openai_tool_calls.clone(),
                         })?;
                     }
-                    
-                    // Build the OpenAI assistant message with tool calls
-                    let openai_tool_calls = if tool_calls.is_empty() {
-                        None
-                    } else {
-                        Some(tool_calls.iter().enumerate().map(|(_idx, call)| {
-                            crate::openai_compat::ToolCall {
-                                id: format!("call_{}", Uuid::new_v4()),
-                                tool_type: "function".to_string(),
-                                function: crate::openai_compat::FunctionCall {
-                                    name: call.tool_name.clone(),
-                                    arguments: call.parameters.to_string(),
-                                },
-                            }
-                        }).collect())
-                    };
                     
                     let assistant_msg = OpenAIMessage::Assistant {
                         content: content.clone(),
@@ -297,6 +298,31 @@ impl Actor for ChatActor {
             ChatMessage::RegisterDisplay { context, display_ref } => {
                 tracing::debug!("Registering display actor for context: {:?}", context);
                 state.display_refs.insert(context, display_ref);
+            }
+            
+            ChatMessage::SwitchSession { session_id, messages } => {
+                tracing::info!("Switching to session: {}", session_id);
+                
+                // Clear current state
+                state.history.clear();
+                state.current_request = None;
+                state.active_tool_calls.clear();
+                
+                // Update session ID
+                state.session_id = session_id.clone();
+                
+                // Set new message history
+                state.messages = messages;
+                
+                // Add system prompt if not present
+                if !state.messages.iter().any(|m| matches!(m, OpenAIMessage::System { .. })) {
+                    state.messages.insert(0, OpenAIMessage::System {
+                        content: self.get_system_prompt(),
+                        name: None,
+                    });
+                }
+                
+                tracing::info!("Session switched. Loaded {} messages", state.messages.len());
             }
         }
         

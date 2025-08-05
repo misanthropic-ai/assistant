@@ -42,12 +42,26 @@ pub struct Session {
 
 impl From<SessionRecord> for Session {
     fn from(record: SessionRecord) -> Self {
+        // Convert Vec<u8> to Vec<f32> for embedding
+        let summary_embedding = record.summary_embedding.and_then(|bytes| {
+            if bytes.len() % 4 == 0 {
+                Some(
+                    bytes
+                        .chunks(4)
+                        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                        .collect()
+                )
+            } else {
+                None
+            }
+        });
+        
         Self {
             id: record.id,
             workspace_path: record.workspace_path,
             name: record.name,
             summary: record.summary,
-            summary_embedding: record.summary_embedding,
+            summary_embedding,
             created_at: record.created_at,
             last_accessed: record.last_accessed,
             updated_at: record.updated_at,

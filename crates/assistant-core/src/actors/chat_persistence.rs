@@ -50,6 +50,7 @@ pub enum ChatPersistenceMessage {
         id: Uuid,
         session_id: String,
         response: String,
+        tool_calls: Option<Vec<crate::openai_compat::ToolCall>>,
     },
     /// Persist a tool call/result
     PersistToolInteraction {
@@ -207,8 +208,13 @@ impl Actor for ChatPersistenceActor {
                 }
             }
             
-            ChatPersistenceMessage::PersistAssistantResponse { id: _, session_id, response } => {
+            ChatPersistenceMessage::PersistAssistantResponse { id: _, session_id, response, tool_calls } => {
                 tracing::info!("Persisting assistant response for session {}: {}", session_id, response);
+                
+                // Convert tool calls to JSON if present
+                let tool_calls_json = tool_calls.as_ref().map(|calls| {
+                    serde_json::to_value(calls).unwrap_or(serde_json::Value::Null)
+                });
                 
                 // Create operation and add to queue
                 let operation_id = Uuid::new_v4();
@@ -216,7 +222,7 @@ impl Actor for ChatPersistenceActor {
                     session_id: session_id.clone(),
                     role: "assistant".to_string(),
                     content: Some(response),
-                    tool_calls: None,
+                    tool_calls: tool_calls_json,
                 };
                 state.pending_operations.insert(operation_id, operation.clone());
                 

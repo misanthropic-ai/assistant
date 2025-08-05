@@ -55,7 +55,5 @@ fn create_message_item(message: &Message) -> ListItem {
         }
     }
     
-    // Don't show visual cursor for streaming messages
-    
     ListItem::new(Text::from(lines))
 }

@@ -8,6 +8,7 @@ pub mod sub_agent;
 pub mod sub_agent_display;
 pub mod sub_agent_chat;
 pub mod chat_persistence;
+pub mod conversation_manager;
 
 /// Common error type for actors
 #[derive(Debug, thiserror::Error)]

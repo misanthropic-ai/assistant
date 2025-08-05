@@ -224,6 +224,7 @@ dependencies = [
  "assistant-core",
  "chrono",
  "crossterm 0.29.0",
+ "dirs 6.0.0",
  "futures",
  "ractor 0.14.7",
  "ratatui",

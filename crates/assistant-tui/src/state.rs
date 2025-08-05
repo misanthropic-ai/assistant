@@ -1,4 +1,5 @@
 use assistant_core::Config;
+use assistant_core::persistence::schema::SessionSummary;
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
 
@@ -28,6 +29,18 @@ pub enum AppMode {
     Normal,
     Insert,
     Command,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ViewMode {
+    /// Normal chat view
+    Chat,
+    /// Conversation list view
+    ConversationList,
+    /// Rename conversation dialog
+    RenameDialog { session_id: String },
+    /// Delete confirmation dialog
+    DeleteConfirmation { session_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -144,11 +157,33 @@ impl InputState {
 }
 
 #[derive(Debug)]
+pub struct ConversationListState {
+    pub conversations: Vec<SessionSummary>,
+    pub selected_index: usize,
+    pub search_query: String,
+    pub is_searching: bool,
+    pub list_scroll_offset: usize,
+}
+
+impl ConversationListState {
+    pub fn new() -> Self {
+        Self {
+            conversations: Vec::new(),
+            selected_index: 0,
+            search_query: String::new(),
+            is_searching: false,
+            list_scroll_offset: 0,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct AppState {
     pub messages: Vec<Message>,
     pub input: InputState,
     #[allow(dead_code)]
     pub mode: AppMode,
+    pub view_mode: ViewMode,
     #[allow(dead_code)]
     pub dialog: DialogType,
     pub scroll_offset: usize,
@@ -157,6 +192,8 @@ pub struct AppState {
     pub should_quit: bool,
     pub message_id_counter: usize,
     pub terminal_size: (u16, u16),
+    pub conversation_list: ConversationListState,
+    pub current_session_id: Option<String>,
 }
 
 impl AppState {
@@ -165,6 +202,7 @@ impl AppState {
             messages: Vec::new(),
             input: InputState::new(),
             mode: AppMode::Insert,
+            view_mode: ViewMode::Chat,
             dialog: DialogType::None,
             scroll_offset: 0,
             config,
@@ -172,6 +210,8 @@ impl AppState {
             should_quit: false,
             message_id_counter: 0,
             terminal_size: (80, 24),
+            conversation_list: ConversationListState::new(),
+            current_session_id: None,
         };
         
         // Add welcome message
