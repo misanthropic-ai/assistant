@@ -10,7 +10,6 @@ use ratatui::{
 pub fn render_messages(area: Rect, buf: &mut Buffer, messages: &[Message], scroll_offset: usize) {
     let message_items: Vec<ListItem> = messages
         .iter()
-        .rev()
         .skip(scroll_offset)
         .take(area.height as usize)
         .map(|msg| create_message_item(msg))

@@ -2,6 +2,7 @@ pub mod cache;
 pub mod client;
 pub mod device;
 pub mod local;
+pub mod ollama;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum EmbeddingProvider {
     OpenAI { model: String },
     Local { model: String },
+    Ollama { model: String },
 }
 
 impl Default for EmbeddingProvider {

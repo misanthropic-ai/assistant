@@ -67,7 +67,6 @@ enum TuiCommands {
 
 mod tool_runner;
 mod prompt_runner;
-mod actor_init;
 
 pub async fn run_cli() -> Result<()> {
     let cli = Cli::parse();

@@ -2,12 +2,13 @@ use crate::{
     events::{handle_key_event, Action},
     state::{AppState, MessageType},
     ui::render,
+    display_actor::DisplayActor,
 };
 use anyhow::Result;
 use assistant_core::{
     config::Config,
     messages::{ChatMessage, UserMessageContent, DisplayContext},
-    ractor::ActorRef,
+    ractor::Actor,
 };
 use crossterm::{
     event::{Event, EventStream},
@@ -23,7 +24,7 @@ use uuid::Uuid;
 pub struct TuiApp {
     state: AppState,
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
-    chat_ref: Option<ActorRef<ChatMessage>>,
+    actor_system: Option<assistant_core::actor_init::ActorSystem>,
     response_rx: mpsc::UnboundedReceiver<ChatMessage>,
 }
 
@@ -49,16 +50,42 @@ impl TuiApp {
         let size = terminal.size()?;
         state.update_terminal_size(size.width, size.height);
         
-        let (_response_tx, response_rx) = mpsc::unbounded_channel();
+        let (response_tx, response_rx) = mpsc::unbounded_channel();
         
-        // For now, we'll initialize without the full actor system
-        // In a real implementation, we'd use the actor_init module
-        let chat_ref = None;
+        // Initialize the actor system
+        let actor_system = match assistant_core::actor_init::init_actor_system(config.clone()).await {
+            Ok(actors) => {
+                // Create and spawn the TUI display actor
+                let display_actor = DisplayActor::new(response_tx.clone());
+                let (display_ref, _) = Actor::spawn(
+                    Some("tui_display".to_string()),
+                    display_actor,
+                    response_tx,
+                )
+                .await?;
+                
+                // Register the display actor with the chat system
+                actors.chat.send_message(ChatMessage::RegisterDisplay {
+                    context: DisplayContext::TUI,
+                    display_ref,
+                })?;
+                
+                Some(actors)
+            }
+            Err(e) => {
+                tracing::error!("Failed to initialize actor system: {}", e);
+                state.add_message(
+                    MessageType::Error,
+                    format!("Failed to initialize chat system: {}", e),
+                );
+                None
+            }
+        };
         
         Ok(Self {
             state,
             terminal,
-            chat_ref,
+            actor_system,
             response_rx,
         })
     }
@@ -162,10 +189,10 @@ impl TuiApp {
     }
     
     async fn send_to_assistant(&mut self, input: String) {
-        if let Some(ref chat_ref) = self.chat_ref {
+        if let Some(ref actor_system) = self.actor_system {
             let message_id = self.state.start_streaming_message(MessageType::Assistant);
             
-            if let Err(e) = chat_ref.send_message(ChatMessage::UserPrompt { 
+            if let Err(e) = actor_system.chat.send_message(ChatMessage::UserPrompt { 
                 id: Uuid::new_v4(),
                 content: UserMessageContent::Text(input),
                 context: DisplayContext::TUI,

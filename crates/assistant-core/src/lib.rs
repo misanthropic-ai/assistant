@@ -1,4 +1,5 @@
 pub mod actors;
+pub mod actor_init;
 pub mod config;
 pub mod embeddings;
 pub mod messages;

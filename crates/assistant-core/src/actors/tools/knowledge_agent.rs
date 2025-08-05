@@ -8,6 +8,7 @@ use crate::embeddings::{
     EmbeddingClient, 
     cache::CachedEmbeddingClient,
     client::{OpenAIEmbeddingClient, OpenAIEmbeddingModel},
+    ollama::{OllamaEmbeddingClient, OllamaEmbeddingModel},
     find_top_k_similar,
 };
 use anyhow::Result;
@@ -112,21 +113,42 @@ impl KnowledgeAgentActor {
         
         // Initialize embedding client if configured
         let embedding_client = if let Some(model_config) = config.embeddings.models.get(&config.embeddings.default_model) {
-            if let (Some(api_key), Some(base_url)) = (&model_config.api_key, &model_config.base_url) {
-                let client = OpenAIEmbeddingClient::new(
-                    api_key.clone(),
-                    base_url.clone(),
-                    OpenAIEmbeddingModel::Custom(model_config.model.clone()),
-                );
-                match CachedEmbeddingClient::new(client, config.embeddings.cache_size) {
-                    Ok(cached_client) => Some(Arc::new(cached_client) as Arc<dyn EmbeddingClient + Send + Sync>),
-                    Err(e) => {
-                        tracing::error!("Failed to create cached embedding client: {}", e);
+            match model_config.provider.as_str() {
+                "openai" => {
+                    if let (Some(api_key), Some(base_url)) = (&model_config.api_key, &model_config.base_url) {
+                        let client = OpenAIEmbeddingClient::new(
+                            api_key.clone(),
+                            base_url.clone(),
+                            OpenAIEmbeddingModel::Custom(model_config.model.clone()),
+                        );
+                        match CachedEmbeddingClient::new(client, config.embeddings.cache_size) {
+                            Ok(cached_client) => Some(Arc::new(cached_client) as Arc<dyn EmbeddingClient + Send + Sync>),
+                            Err(e) => {
+                                tracing::error!("Failed to create cached embedding client: {}", e);
+                                None
+                            }
+                        }
+                    } else {
                         None
                     }
                 }
-            } else {
-                None
+                "ollama" => {
+                    let base_url = model_config.base_url.clone()
+                        .unwrap_or_else(|| "http://localhost:11434".to_string());
+                    let model = match model_config.model.as_str() {
+                        "mxbai-embed-large" => OllamaEmbeddingModel::MxbaiEmbedLarge,
+                        other => OllamaEmbeddingModel::Custom(other.to_string()),
+                    };
+                    let client = OllamaEmbeddingClient::new(base_url, model);
+                    match CachedEmbeddingClient::new(client, config.embeddings.cache_size) {
+                        Ok(cached_client) => Some(Arc::new(cached_client) as Arc<dyn EmbeddingClient + Send + Sync>),
+                        Err(e) => {
+                            tracing::error!("Failed to create cached embedding client: {}", e);
+                            None
+                        }
+                    }
+                }
+                _ => None
             }
         } else {
             None

@@ -181,5 +181,17 @@ pub async fn create_embedding_client(
             
             Ok(Box::new(client))
         }
+        super::EmbeddingProvider::Ollama { model } => {
+            let base_url = base_url.unwrap_or_else(|| "http://localhost:11434".to_string());
+            let model = match model.as_str() {
+                "mxbai-embed-large" => super::ollama::OllamaEmbeddingModel::MxbaiEmbedLarge,
+                other => super::ollama::OllamaEmbeddingModel::Custom(other.to_string()),
+            };
+            
+            Ok(Box::new(super::ollama::OllamaEmbeddingClient::new(
+                base_url,
+                model,
+            )))
+        }
     }
 }

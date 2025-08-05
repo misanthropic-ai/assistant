@@ -10,7 +10,7 @@ use assistant_core::{
     openai_compat::{ChatMessage as OpenAIMessage, UserContent},
 };
 use tokio::sync::mpsc;
-use crate::actor_init;
+use assistant_core::actor_init;
 
 /// Run a full agent prompt with tool calling support
 pub async fn run_agent_prompt(input: String, max_iterations: usize, config_path: Option<&str>) -> Result<()> {

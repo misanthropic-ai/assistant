@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use std::time::Duration;
 use std::collections::HashMap;
+use std::sync::Arc;
 use anyhow::Result;
 use sqlx::Row;
 
@@ -10,8 +11,11 @@ use crate::config::Config;
 use crate::actors::client::ClientMessage;
 use crate::openai_compat::{ChatMessage as OpenAIMessage, UserContent};
 use crate::persistence::database::Database;
-use crate::embeddings::client::OpenAIEmbeddingClient;
-use crate::embeddings::EmbeddingClient;
+use crate::embeddings::{
+    client::OpenAIEmbeddingClient,
+    ollama::{OllamaEmbeddingClient, OllamaEmbeddingModel},
+    EmbeddingClient,
+};
 
 /// Represents a database operation that needs to be tracked
 #[derive(Debug, Clone)]
@@ -85,7 +89,7 @@ pub struct ChatPersistenceActor {
     #[allow(dead_code)]
     config: Config,
     database: Database,
-    embedding_client: Option<OpenAIEmbeddingClient>,
+    embedding_client: Option<Arc<dyn EmbeddingClient + Send + Sync>>,
     client_ref: Option<ActorRef<ClientMessage>>,
 }
 
@@ -406,20 +410,33 @@ impl ChatPersistenceActor {
         
         // Create embedding client if configured
         let embedding_client = if let Some(model_config) = config.embeddings.models.get(&config.embeddings.default_model) {
-            if model_config.provider == "openai" {
-                if let Some(api_key) = &model_config.api_key {
+            match model_config.provider.as_str() {
+                "openai" => {
+                    if let Some(api_key) = &model_config.api_key {
+                        let base_url = model_config.base_url.as_ref()
+                            .unwrap_or(&"https://api.openai.com/v1".to_string())
+                            .clone();
+                        let model = crate::embeddings::client::OpenAIEmbeddingModel::Custom(model_config.model.clone());
+                        Some(Arc::new(OpenAIEmbeddingClient::new(api_key.clone(), base_url, model)) as Arc<dyn EmbeddingClient + Send + Sync>)
+                    } else {
+                        tracing::warn!("OpenAI embeddings configured but no API key provided");
+                        None
+                    }
+                }
+                "ollama" => {
                     let base_url = model_config.base_url.as_ref()
-                        .unwrap_or(&"https://api.openai.com/v1".to_string())
+                        .unwrap_or(&"http://localhost:11434".to_string())
                         .clone();
-                    let model = crate::embeddings::client::OpenAIEmbeddingModel::Custom(model_config.model.clone());
-                    Some(OpenAIEmbeddingClient::new(api_key.clone(), base_url, model))
-                } else {
-                    tracing::warn!("OpenAI embeddings configured but no API key provided");
+                    let model = match model_config.model.as_str() {
+                        "mxbai-embed-large" => OllamaEmbeddingModel::MxbaiEmbedLarge,
+                        other => OllamaEmbeddingModel::Custom(other.to_string()),
+                    };
+                    Some(Arc::new(OllamaEmbeddingClient::new(base_url, model)) as Arc<dyn EmbeddingClient + Send + Sync>)
+                }
+                other => {
+                    tracing::warn!("Unsupported embedding provider: {}", other);
                     None
                 }
-            } else {
-                tracing::warn!("Non-OpenAI embedding provider not yet supported in chat persistence");
-                None
             }
         } else {
             None
@@ -644,7 +661,7 @@ impl ChatPersistenceActor {
         session_id: &str,
         client_ref: Option<ActorRef<ClientMessage>>,
         database: Database,
-        embedding_client: Option<OpenAIEmbeddingClient>,
+        embedding_client: Option<Arc<dyn EmbeddingClient + Send + Sync>>,
     ) -> Result<()> {
         // Fetch recent messages
         let rows = sqlx::query(
