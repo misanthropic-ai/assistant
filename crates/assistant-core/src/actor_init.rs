@@ -26,7 +26,6 @@ use crate::{
     ractor::{Actor, ActorRef},
 };
 use std::sync::Arc;
-use uuid::Uuid;
 
 /// All the actor references needed for the system
 pub struct ActorSystem {
@@ -85,7 +84,8 @@ pub async fn init_actor_system(config: Config) -> Result<ActorSystem> {
     ).await?;
     
     // Create chat with references
-    let session_id = Uuid::new_v4().to_string();
+    // Don't create a session_id here - let the conversation manager handle it
+    let session_id = String::new();  // Empty session_id, will be set later
     let chat = ChatActor::new(config.as_ref().clone(), session_id)
         .with_client_ref(client_ref.clone())
         .with_delegator_ref(delegator_ref.clone())

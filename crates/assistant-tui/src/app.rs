@@ -387,6 +387,7 @@ impl TuiApp {
                 id: Uuid::new_v4(),
                 content: UserMessageContent::Text(input),
                 context: DisplayContext::TUI,
+                session_id: self.state.current_session_id.clone(),
             }) {
                 self.state.finish_streaming_message(message_id);
                 self.state.add_message(
@@ -408,13 +409,31 @@ impl TuiApp {
                 if let Some(msg) = self.state.messages.iter_mut().rev().find(|m| m.is_streaming) {
                     msg.content.push_str(&token);
                     self.state.scroll_to_bottom();
+                } else {
+                    // No streaming message found, create one
+                    tracing::warn!("Received stream token but no streaming message active, creating new one");
+                    let message_id = self.state.start_streaming_message(MessageType::Assistant);
+                    if let Some(msg) = self.state.messages.iter_mut().find(|m| m.id == message_id) {
+                        msg.content.push_str(&token);
+                        self.state.scroll_to_bottom();
+                    }
                 }
             }
             ChatMessage::Complete { id: _, response } => {
+                // Check if we have a streaming message to complete
                 if let Some(msg) = self.state.messages.iter_mut().rev().find(|m| m.is_streaming) {
-                    msg.content = response;
+                    // If the streaming message is empty but we have a response, use the response
+                    if msg.content.is_empty() && !response.is_empty() {
+                        msg.content = response;
+                    }
+                    // If the streaming message has content, keep it (stream tokens were already received)
                     msg.is_streaming = false;
                     self.state.is_streaming = false;
+                } else if !response.is_empty() {
+                    // No streaming message found but we have a response - create a new message
+                    // This can happen when the assistant sends a complete response without streaming
+                    tracing::debug!("Complete message received without active streaming, creating new message");
+                    self.state.add_message(MessageType::Assistant, response);
                 }
             }
             ChatMessage::Error { id: _, error } => {
@@ -434,7 +453,27 @@ impl TuiApp {
                 );
             }
             ChatMessage::ToolResult { id: _, result } => {
+                // First, finish any existing streaming message
+                if let Some(msg) = self.state.messages.iter_mut().rev().find(|m| m.is_streaming) {
+                    msg.is_streaming = false;
+                }
+                self.state.is_streaming = false;
+                
+                // Display the tool result
                 self.state.add_message(MessageType::Info, format!("📋 Tool result: {}", result));
+            }
+            ChatMessage::AssistantResponse { id: _, content, tool_calls } => {
+                // When we get an assistant response, check if we need to start a new message
+                if tool_calls.is_empty() && content.is_some() {
+                    // This is a text response after tool calls or initial response
+                    // Check if we're currently streaming
+                    if !self.state.is_streaming {
+                        // Start a new streaming message
+                        let message_id = self.state.start_streaming_message(MessageType::Assistant);
+                        tracing::debug!("Started new streaming message {} for assistant response", message_id);
+                    }
+                }
+                // Tool calls are handled separately via ToolRequest messages
             }
             _ => {}
         }
@@ -555,8 +594,28 @@ impl TuiApp {
                             assistant_core::openai_compat::ChatMessage::System { .. } => {
                                 tracing::info!("Message {}: System (skipped)", idx);
                             }
-                            assistant_core::openai_compat::ChatMessage::Tool { .. } => {
-                                tracing::info!("Message {}: Tool (skipped)", idx);
+                            assistant_core::openai_compat::ChatMessage::Tool { content, tool_call_id } => {
+                                // Tool messages are results from tool executions
+                                // Extract tool name from content if possible
+                                let tool_name = if content.starts_with("Tool '") {
+                                    content.split('\'')
+                                        .nth(1)
+                                        .unwrap_or("Tool")
+                                        .to_string()
+                                } else if content.starts_with("Tool result from ") {
+                                    content.split(':').next()
+                                        .and_then(|s| s.strip_prefix("Tool result from "))
+                                        .unwrap_or("Tool")
+                                        .to_string()
+                                } else {
+                                    "Tool".to_string()
+                                };
+                                
+                                tracing::info!("Message {}: Tool result - {} (tool_call_id: {})", idx, tool_name, tool_call_id);
+                                self.state.add_message(
+                                    MessageType::Tool { name: tool_name.clone() },
+                                    format!("📋 {}", content)
+                                );
                             }
                         }
                     }

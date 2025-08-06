@@ -89,16 +89,24 @@ impl Actor for ChatActor {
         }
         
         match msg {
-            ChatMessage::UserPrompt { id, content, context } => {
+            ChatMessage::UserPrompt { id, content, context, session_id } => {
                 // Extract text for logging and persistence
                 let prompt_text = match &content {
                     UserMessageContent::Text(text) => text.clone(),
                     UserMessageContent::MultiModal { text, .. } => text.clone(),
                 };
                 
-                tracing::info!("Received user prompt: {}", prompt_text);
+                // Use provided session_id if available, otherwise use state's session_id
+                if let Some(provided_session_id) = session_id {
+                    if state.session_id.is_empty() || state.session_id != provided_session_id {
+                        tracing::info!("Using session_id from UserPrompt: {}", provided_session_id);
+                        state.session_id = provided_session_id;
+                    }
+                }
+                
+                tracing::info!("Received user prompt: {} (session: {})", prompt_text, state.session_id);
                 state.current_context = Some(context.clone());
-                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context });
+                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context, session_id: Some(state.session_id.clone()) });
                 state.current_request = Some(id);
                 
                 // Persist user prompt (currently just text)
@@ -385,10 +393,14 @@ IMPORTANT: Knowledge and Memory Management
   - Session metadata and context
 
 Knowledge Agent Guidelines:
-1. When a user shares important information, use the knowledge_agent to store it
+1. AUTOMATICALLY store important user information when shared, including:
+   - Names, preferences, personal details
+   - Important facts they mention about themselves
+   - Context about their work, projects, or interests
 2. When asked about something, ALWAYS use the knowledge_agent to search first
 3. The knowledge_agent handles all memory operations internally
 4. For complex queries, the knowledge_agent can synthesize information from multiple sources
+5. Don't ask "should I store this?" - just store important information proactively
 
 Common knowledge_agent actions:
 - search: Find relevant information across all knowledge sources

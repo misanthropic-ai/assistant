@@ -220,6 +220,7 @@ impl Actor for SubAgentActor {
                         id,
                         content: crate::messages::UserMessageContent::Text(full_prompt),
                         context: DisplayContext::SubAgent,
+                        session_id: None,  // Sub-agents don't use sessions
                     })?;
                 } else {
                     tracing::error!("Sub-agent {} has no chat_ref!", self.tool_name);

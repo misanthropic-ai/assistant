@@ -76,6 +76,7 @@ pub async fn run_agent_prompt(input: String, max_iterations: usize, config_path:
         id: request_id,
         content: assistant_core::messages::UserMessageContent::Text(prompt),
         context: DisplayContext::CLI,
+        session_id: None,  // CLI doesn't manage sessions
     })?;
     
     // Wait for completion

@@ -574,6 +574,7 @@ impl KnowledgeAgentActor {
     }
     
     async fn store_in_memory(&self, content: String, key: Option<String>, metadata: Option<serde_json::Value>, state: &KnowledgeAgentState) -> String {
+        tracing::info!("store_in_memory called with content: {}", content);
         // For now, directly store in the database
         // In the future, this could delegate to a memory tool actor if available
         
@@ -619,8 +620,14 @@ impl KnowledgeAgentActor {
         .await;
         
         match result {
-            Ok(_) => format!("Successfully stored memory with key: {}", memory_key),
-            Err(e) => format!("Failed to store memory: {}", e),
+            Ok(res) => {
+                tracing::info!("Memory stored successfully: key={}, rows_affected={}", memory_key, res.rows_affected());
+                format!("Successfully stored memory with key: {}", memory_key)
+            },
+            Err(e) => {
+                tracing::error!("Failed to store memory: {:?}", e);
+                format!("Failed to store memory: {}", e)
+            },
         }
     }
 }
@@ -699,6 +706,7 @@ impl Actor for KnowledgeAgentActor {
                         }
                     }
                     KnowledgeAction::Store { content, key, metadata } => {
+                        tracing::info!("KnowledgeAgent storing memory: content={}, key={:?}", content, key);
                         // Use the memory tool to store the information
                         self.store_in_memory(content, key, metadata, state).await
                     }

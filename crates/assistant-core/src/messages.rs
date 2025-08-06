@@ -31,7 +31,12 @@ pub enum UserMessageContent {
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
     /// User input prompt
-    UserPrompt { id: Uuid, content: UserMessageContent, context: DisplayContext },
+    UserPrompt { 
+        id: Uuid, 
+        content: UserMessageContent, 
+        context: DisplayContext,
+        session_id: Option<String>,  // Optional to maintain backward compatibility
+    },
     
     /// Streaming token from LLM
     StreamToken { token: String },

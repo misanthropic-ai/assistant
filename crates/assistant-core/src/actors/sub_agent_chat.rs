@@ -72,7 +72,7 @@ impl Actor for SubAgentChatActor {
         }
         
         match msg {
-            ChatMessage::UserPrompt { id, content, context } => {
+            ChatMessage::UserPrompt { id, content, context, session_id: _ } => {
                 // Extract text for logging
                 let mut prompt_text = match &content {
                     crate::messages::UserMessageContent::Text(text) => text.clone(),
@@ -87,7 +87,7 @@ impl Actor for SubAgentChatActor {
 
                 tracing::info!("SubAgentChat received user prompt: {}", prompt_text);
                 state.current_context = Some(context.clone());
-                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context });
+                state.history.push_back(ChatMessage::UserPrompt { id, content: content.clone(), context, session_id: None });
                 state.current_request = Some(id);
                 
                 // Add user message to conversation
